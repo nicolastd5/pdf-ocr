@@ -24,63 +24,116 @@ jobs:
       - name: Install Python dependencies
         run: pip install pyinstaller pytesseract pillow pdf2image reportlab PyPDF2
 
-      # ── Tesseract OCR ────────────────────────────────────────────────────────
-      - name: Download Tesseract installer
+      # ── Tesseract via Chocolatey (já disponível no runner) ───────────────────
+      - name: Install Tesseract via Chocolatey
         shell: pwsh
         run: |
-          $url = "https://github.com/UB-Mannheim/tesseract/releases/download/v5.4.0.20240606/tesseract-ocr-w64-setup-5.4.0.20240606.exe"
-          Invoke-WebRequest -Uri $url -OutFile tesseract_installer.exe -UseBasicParsing
+          choco install tesseract --yes --no-progress `
+            --params "'/Components:por /Components:eng'"
+          # Aguarda finalização
+          Start-Sleep -Seconds 10
 
-      - name: Install Tesseract silently
+      - name: Locate and copy Tesseract to deps/
         shell: pwsh
         run: |
-          Start-Process -FilePath ".\tesseract_installer.exe" `
-            -ArgumentList "/S", "/COMPONENTS=lang_por,lang_eng", "/D=C:\Tesseract" `
-            -Wait -NoNewWindow
-          Start-Sleep -Seconds 5
+          # Encontra onde o choco instalou
+          $tess = Get-Command tesseract -ErrorAction SilentlyContinue
+          if ($tess) {
+            $tessDir = Split-Path $tess.Source
+          } else {
+            # Fallback: caminhos padrão do choco
+            $candidates = @(
+              "C:\Program Files\Tesseract-OCR",
+              "C:\tools\tesseract"
+            )
+            $tessDir = $candidates | Where-Object { Test-Path "$_\tesseract.exe" } | Select-Object -First 1
+          }
+          Write-Host "Tesseract dir: $tessDir"
 
-      - name: Copy Tesseract to deps/
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path deps\tesseract -Force
-          Copy-Item "C:\Tesseract\tesseract.exe" deps\tesseract\
-          Get-ChildItem "C:\Tesseract\*.dll" | Copy-Item -Destination deps\tesseract\ -ErrorAction SilentlyContinue
-          Copy-Item "C:\Tesseract\tessdata" deps\tesseract\ -Recurse
-          # Mantém apenas os modelos necessários
-          Get-ChildItem deps\tesseract\tessdata -File |
+          New-Item -ItemType Directory -Path deps\tesseract -Force | Out-Null
+
+          Copy-Item "$tessDir\tesseract.exe" deps\tesseract\
+          Get-ChildItem "$tessDir\*.dll" -ErrorAction SilentlyContinue |
+            Copy-Item -Destination deps\tesseract\
+
+          # tessdata
+          $tessdata = "$tessDir\tessdata"
+          if (Test-Path $tessdata) {
+            Copy-Item $tessdata deps\tesseract\ -Recurse
+          }
+
+          # Baixa modelos por/eng caso não estejam presentes
+          $tdDest = "deps\tesseract\tessdata"
+          New-Item -ItemType Directory -Path $tdDest -Force | Out-Null
+
+          foreach ($lang in @("por", "eng", "osd")) {
+            $dest = "$tdDest\$lang.traineddata"
+            if (-not (Test-Path $dest)) {
+              $src = "https://github.com/tesseract-ocr/tessdata/raw/main/$lang.traineddata"
+              Write-Host "Baixando $lang.traineddata..."
+              Invoke-WebRequest -Uri $src -OutFile $dest -UseBasicParsing
+            }
+          }
+
+          # Remove modelos desnecessários para reduzir tamanho
+          Get-ChildItem "$tdDest\*.traineddata" |
             Where-Object { $_.Name -notmatch "^(por|eng|osd)\.traineddata$" } |
             Remove-Item -Force
 
-      # ── Poppler ──────────────────────────────────────────────────────────────
-      - name: Download and extract Poppler
-        shell: pwsh
-        run: |
-          $url = "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip"
-          Invoke-WebRequest -Uri $url -OutFile poppler.zip -UseBasicParsing
-          Expand-Archive -Path poppler.zip -DestinationPath poppler_extracted -Force
+          # Confirma
+          Write-Host "=== deps\tesseract ==="
+          Get-ChildItem deps\tesseract -Recurse | Select-Object FullName
 
-      - name: Copy Poppler to deps/
+      # ── Poppler ──────────────────────────────────────────────────────────────
+      - name: Install Poppler via Chocolatey
+        shell: pwsh
+        run: choco install poppler --yes --no-progress
+
+      - name: Locate and copy Poppler to deps/
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path deps\poppler\bin -Force
-          $binDir = Get-ChildItem -Path poppler_extracted -Recurse -Filter "pdftoppm.exe" |
-                    Select-Object -First 1 -ExpandProperty DirectoryName
+          $pdftoppm = Get-Command pdftoppm -ErrorAction SilentlyContinue
+          if ($pdftoppm) {
+            $binDir = Split-Path $pdftoppm.Source
+          } else {
+            # Fallback: procura recursivamente em C:\tools e C:\ProgramData\chocolatey
+            $found = Get-ChildItem "C:\tools", "C:\ProgramData\chocolatey" `
+                       -Recurse -Filter "pdftoppm.exe" -ErrorAction SilentlyContinue |
+                       Select-Object -First 1
+            if (-not $found) {
+              # Segunda tentativa: baixar zip direto
+              Write-Host "Baixando Poppler do GitHub..."
+              $url = "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip"
+              Invoke-WebRequest -Uri $url -OutFile poppler.zip -UseBasicParsing
+              Expand-Archive poppler.zip poppler_extracted -Force
+              $found = Get-ChildItem poppler_extracted -Recurse -Filter "pdftoppm.exe" |
+                       Select-Object -First 1
+            }
+            $binDir = $found.DirectoryName
+          }
+          Write-Host "Poppler bin: $binDir"
+
+          New-Item -ItemType Directory -Path deps\poppler\bin -Force | Out-Null
           Get-ChildItem "$binDir\*.exe" | Copy-Item -Destination deps\poppler\bin\
-          Get-ChildItem "$binDir\*.dll" | Copy-Item -Destination deps\poppler\bin\ -ErrorAction SilentlyContinue
+          Get-ChildItem "$binDir\*.dll" -ErrorAction SilentlyContinue |
+            Copy-Item -Destination deps\poppler\bin\
+
+          Write-Host "=== deps\poppler\bin ==="
+          Get-ChildItem deps\poppler\bin | Select-Object Name
 
       # ── Build EXE ────────────────────────────────────────────────────────────
       - name: Build EXE with PyInstaller
         run: pyinstaller pdf_ocr.spec
 
-      - name: Verify EXE was created
+      - name: Verify EXE
         shell: pwsh
         run: |
           if (-not (Test-Path "dist\PDF_OCR.exe")) {
             Write-Error "dist\PDF_OCR.exe not found!"
             exit 1
           }
-          $size = (Get-Item "dist\PDF_OCR.exe").Length / 1MB
-          Write-Host "EXE size: $([math]::Round($size,1)) MB"
+          $size = [math]::Round((Get-Item "dist\PDF_OCR.exe").Length / 1MB, 1)
+          Write-Host "EXE gerado com sucesso: $size MB"
 
       # ── Release ──────────────────────────────────────────────────────────────
       - name: Upload artifact
@@ -104,7 +157,7 @@ jobs:
             ### Novidades desta versão
             - Janela de atualização com changelog completo ao detectar nova versão
             - Download e aplicação automática do update com barra de progresso
-            - Projeto estruturado para VS Code (.vscode/, launch.json, extensions.json)
-            - Correção do build: link do Tesseract atualizado para v5.4.0
+            - Projeto estruturado para VS Code
+            - Tesseract e Poppler embutidos no EXE
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
