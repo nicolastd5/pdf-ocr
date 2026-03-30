@@ -1,5 +1,5 @@
 """
-PDF OCR v0.7
+PDF OCR v0.8
 Converte PDFs escaneados em PDFs pesquisáveis com OCR.
 Repositório: https://github.com/nicolastd5/pdf-ocr
 """
@@ -30,7 +30,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.7"
+APP_VERSION = "0.8"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -156,6 +156,7 @@ def _style_entry(e):
         highlightthickness=1,
         highlightbackground=C["border"],
         highlightcolor=C["accent"],
+        readonlybackground=C["input"],
         disabledbackground=C["input"],
         disabledforeground=C["fg_dim"],
     )
@@ -186,17 +187,16 @@ def _accent_btn(parent, text, command, font=None, **kw):
         relief="flat", bd=0, cursor="hand2",
         font=font, **kw
     )
-    btn.bind("<Enter>", lambda _: btn.config(bg=C["accent_dk"]))
-    btn.bind("<Leave>", lambda _: btn.config(bg=C["accent"]))
+    btn.bind("<Enter>", lambda _: btn.config(bg=C["accent_dk"]) if str(btn.cget("state")) != "disabled" else None)
+    btn.bind("<Leave>", lambda _: btn.config(bg=C["accent"]) if str(btn.cget("state")) != "disabled" else None)
     return btn
 
 
 class CanvasProgressBar(tk.Canvas):
     """Barra de progresso customizada desenhada em Canvas."""
-    _H = 6
 
     def __init__(self, parent, **kw):
-        kw.setdefault("height", self._H)
+        kw.setdefault("height", 6)
         kw.setdefault("bg", C["panel"])
         kw.setdefault("highlightthickness", 0)
         super().__init__(parent, **kw)
@@ -209,23 +209,35 @@ class CanvasProgressBar(tk.Canvas):
 
     def _redraw(self, *_):
         w = self.winfo_width()
-        h = self._H
+        h = self.winfo_height()
+        if w < 2 or h < 2:
+            return
         self.delete("all")
+        r = min(3, h // 2)
         # track
-        self.create_rounded_rect(0, 0, w, h, 3, fill=C["input"], outline="")
+        self._rounded_rect(0, 0, w, h, r, fill=C["input"], outline="")
         # fill
         fill_w = int(w * self._value / 100)
-        if fill_w > 3:
-            self.create_rounded_rect(0, 0, fill_w, h, 3, fill=C["accent"], outline="")
+        if fill_w > r:
+            self._rounded_rect(0, 0, fill_w, h, r, fill=C["accent"], outline="")
 
-    def create_rounded_rect(self, x1, y1, x2, y2, r, **kw):
-        r = min(r, (x2 - x1) // 2, (y2 - y1) // 2)
-        self.create_arc(x1,     y1,     x1+2*r, y1+2*r, start=90,  extent=90,  style="pieslice", **kw)
-        self.create_arc(x2-2*r, y1,     x2,     y1+2*r, start=0,   extent=90,  style="pieslice", **kw)
-        self.create_arc(x1,     y2-2*r, x1+2*r, y2,     start=180, extent=90,  style="pieslice", **kw)
-        self.create_arc(x2-2*r, y2-2*r, x2,     y2,     start=270, extent=90,  style="pieslice", **kw)
-        self.create_rectangle(x1+r, y1, x2-r, y2, **kw)
-        self.create_rectangle(x1, y1+r, x2, y2-r, **kw)
+    def _rounded_rect(self, x1, y1, x2, y2, r, **kw):
+        """Draws a rounded rectangle using a smooth polygon (no pieslice artifacts)."""
+        points = [
+            x1+r, y1,
+            x2-r, y1,
+            x2,   y1,
+            x2,   y1+r,
+            x2,   y2-r,
+            x2,   y2,
+            x2-r, y2,
+            x1+r, y2,
+            x1,   y2,
+            x1,   y2-r,
+            x1,   y1+r,
+            x1,   y1,
+        ]
+        self.create_polygon(points, smooth=True, **kw)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -383,10 +395,6 @@ class UpdateDialog(tk.Toplevel):
         txt.insert("1.0", body)
         txt.config(state="disabled")
 
-        style = ttk.Style()
-        style.configure("Dark.Vertical.TScrollbar",
-                        background=C["input"], troughcolor=C["panel"],
-                        bordercolor=C["panel"], arrowcolor=C["fg_dim"])
         sb = ttk.Scrollbar(body_frame, orient="vertical",
                            command=txt.yview, style="Dark.Vertical.TScrollbar")
         txt.configure(yscrollcommand=sb.set)
@@ -633,6 +641,7 @@ class PDFOcrApp(tk.Tk):
 
         # botões de navegação
         self._nav_btns = {}
+        self._nav_active_key = None
         for key, icon, label in self._NAV:
             f = tk.Frame(self._sidebar, bg=C["sidebar"])
             f.pack(fill="x")
@@ -647,8 +656,8 @@ class PDFOcrApp(tk.Tk):
                 command=lambda k=key: self._show_page(k)
             )
             btn.pack(fill="x")
-            btn.bind("<Enter>", lambda e, b=btn: b.config(fg=C["fg"]) if b.cget("fg") == C["fg_dim"] else None)
-            btn.bind("<Leave>", lambda e, b=btn: b.config(fg=C["fg_dim"]) if b.cget("fg") == C["fg"] else None)
+            btn.bind("<Enter>", lambda e, b=btn, k=key: b.config(fg=C["fg"]) if k != self._nav_active_key else None)
+            btn.bind("<Leave>", lambda e, b=btn, k=key: b.config(fg=C["fg_dim"]) if k != self._nav_active_key else None)
             self._nav_btns[key] = btn
 
         # área de conteúdo
@@ -680,6 +689,7 @@ class PDFOcrApp(tk.Tk):
         if self._active_page == key:
             return
         self._active_page = key
+        self._nav_active_key = key
         for k, frame in self._page_frames.items():
             frame.pack_forget()
         self._page_frames[key].pack(fill="both", expand=True, padx=0, pady=0)
@@ -688,12 +698,8 @@ class PDFOcrApp(tk.Tk):
         for k, btn in self._nav_btns.items():
             if k == key:
                 btn.config(fg=C["accent"], bg=C["hover"])
-                btn.unbind("<Enter>")
-                btn.unbind("<Leave>")
             else:
                 btn.config(fg=C["fg_dim"], bg=C["sidebar"])
-                btn.bind("<Enter>", lambda e, b=btn: b.config(fg=C["fg"]) if b.cget("fg") == C["fg_dim"] else None)
-                btn.bind("<Leave>", lambda e, b=btn: b.config(fg=C["fg_dim"]) if b.cget("fg") == C["fg"] else None)
 
         titles = {
             "ocr":   ("OCR",   "Converta PDFs escaneados em PDFs pesquisáveis"),
@@ -708,8 +714,6 @@ class PDFOcrApp(tk.Tk):
     def _build_ocr_page(self):
         page = tk.Frame(self._pages, bg=C["bg"])
         self._page_frames["ocr"] = page
-
-        pad = {"padx": 24, "pady": 0}
 
         # card principal
         card = tk.Frame(page, bg=C["panel"],
@@ -754,19 +758,17 @@ class PDFOcrApp(tk.Tk):
 
         # status + barra de progresso
         status_f = tk.Frame(page, bg=C["bg"])
-        status_f.pack(fill="x", **pad, pady=(4, 6))
+        status_f.pack(fill="x", padx=24, pady=(4, 6))
         tk.Label(status_f, textvariable=self.status,
                  font=("Segoe UI", 9), bg=C["bg"], fg=C["fg_dim"],
                  anchor="w").pack(fill="x")
 
         self.pb = CanvasProgressBar(page, height=6)
         self.pb.pack(fill="x", padx=24, pady=(0, 16))
-        # fazer o progress_var driver
-        self.progress_var.trace_add("write", lambda *_: self.pb.set(self.progress_var.get()))
 
         # botões de ação
         btn_f = tk.Frame(page, bg=C["bg"])
-        btn_f.pack(fill="x", **pad)
+        btn_f.pack(fill="x", padx=24)
         self.btn_run = _accent_btn(
             btn_f, text="  ▶  Iniciar OCR  ",
             command=self._start,
@@ -948,6 +950,7 @@ class PDFOcrApp(tk.Tk):
         self.input_path.set("")
         self.output_path.set("")
         self.progress_var.set(0)
+        self.pb.set(0)
         self.status.set("Aguardando arquivo...")
 
     def _start(self):
@@ -1033,7 +1036,7 @@ class PDFOcrApp(tk.Tk):
                 c.save()
                 page_buffers.append(buf.getvalue())
                 pct = i / total * 95
-                self.after(0, lambda p=pct: self.progress_var.set(p))
+                self.after(0, lambda p=pct: (self.progress_var.set(p), self.pb.set(p)))
 
             self._spinner_status("Gerando PDF final...")
             self._set_status("Gerando PDF final...")
@@ -1043,7 +1046,7 @@ class PDFOcrApp(tk.Tk):
             with open(output_pdf, "wb") as f:
                 merger.write(f)
 
-            self.after(0, lambda: self.progress_var.set(100))
+            self.after(0, lambda: (self.progress_var.set(100), self.pb.set(100)))
             self._set_status(f"Concluído! {os.path.basename(output_pdf)}")
             self.after(0, self._close_spinner)
             self.after(0, lambda: messagebox.showinfo(
