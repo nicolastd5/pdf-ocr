@@ -1,0 +1,17 @@
+# license_server/render.yaml
+services:
+  - type: web
+    name: pdf-ocr-license
+    runtime: python
+    rootDir: license_server
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: DB_PATH
+        value: /data/licenses.db
+    disk:
+      name: licenses-data
+      mountPath: /data
+      sizeGB: 1
