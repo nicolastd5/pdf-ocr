@@ -1238,8 +1238,28 @@ class PDFOcrApp(tk.Tk):
         page = tk.Frame(self._pages, bg=C["bg"])
         self._page_frames["about"] = page
 
+        # scrollable canvas
+        canvas = tk.Canvas(page, bg=C["bg"], highlightthickness=0)
+        sb = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        scroll_frame = tk.Frame(canvas, bg=C["bg"])
+        _sw = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+
+        def _on_resize(event):
+            canvas.itemconfig(_sw, width=event.width)
+        canvas.bind("<Configure>", _on_resize)
+        scroll_frame.bind("<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
         # card info
-        card = tk.Frame(page, bg=C["panel"],
+        card = tk.Frame(scroll_frame, bg=C["panel"],
                         highlightthickness=1,
                         highlightbackground=C["border"])
         card.pack(fill="x", padx=24, pady=20)
@@ -1313,10 +1333,10 @@ class PDFOcrApp(tk.Tk):
                  fg=C["fg_dim"]).pack(side="left")
 
         # card atualização
-        upd_card = tk.Frame(page, bg=C["panel"],
+        upd_card = tk.Frame(scroll_frame, bg=C["panel"],
                             highlightthickness=1,
                             highlightbackground=C["border"])
-        upd_card.pack(fill="x", padx=24)
+        upd_card.pack(fill="x", padx=24, pady=(0, 24))
 
         upd_inner = tk.Frame(upd_card, bg=C["panel"], padx=20, pady=16)
         upd_inner.pack(fill="x")
