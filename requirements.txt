@@ -1,0 +1,6 @@
+pytesseract
+pillow
+pdf2image
+reportlab
+PyPDF2
+pyinstaller
