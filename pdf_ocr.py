@@ -1,5 +1,5 @@
 """
-PDF OCR v0.3
+PDF OCR v0.5
 Converte PDFs escaneados em PDFs pesquisáveis com OCR.
 Repositório: https://github.com/nicolastd5/pdf-ocr
 """
@@ -30,7 +30,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.4"
+APP_VERSION = "0.5"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -77,9 +77,8 @@ def find_poppler():
         bundled_dir = os.path.join(sys._MEIPASS, "poppler", "bin")
         if os.path.isdir(bundled_dir):
             return bundled_dir
-    else:
-        if shutil.which("pdftoppm"):
-            return None
+    if shutil.which("pdftoppm"):
+        return None  # está no PATH, pdf2image encontra sozinho
     for p in [
         r"C:\Program Files\poppler\Library\bin",
         r"C:\Program Files\poppler-24\Library\bin",
@@ -316,7 +315,7 @@ class UpdateDialog(tk.Toplevel):
             font=("Segoe UI", 10), bg=self._BG, fg=self._FG_SUB,
             activebackground="#2e2e4e", activeforeground=self._FG,
             relief="flat", padx=12, pady=8,
-            command=self.destroy
+            command=self._dismiss
         ).pack(side="left")
 
         self._center(self._parent)
@@ -326,6 +325,13 @@ class UpdateDialog(tk.Toplevel):
         x = parent.winfo_rootx() + (parent.winfo_width()  - self.winfo_reqwidth())  // 2
         y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_reqheight()) // 2
         self.geometry(f"+{x}+{y}")
+
+    def _dismiss(self):
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.destroy()
 
     # ── Download + aplicação ──────────────────────────────────
 
@@ -352,7 +358,7 @@ class UpdateDialog(tk.Toplevel):
             tmp_exe  = os.path.join(tmp_dir, "PDF_OCR_new.exe")
 
             req = urllib.request.Request(url, headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"})
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=300) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 chunk = 65536
@@ -450,6 +456,7 @@ class PDFOcrApp(tk.Tk):
         self._spinner     = None
 
         self._build_ui()
+        self._load_prefs()
 
         if not DEPS_OK:
             self._show_dep_error()
@@ -613,7 +620,6 @@ class PDFOcrApp(tk.Tk):
     # ── Update ────────────────────────────────────────────────
 
     def _auto_update_check(self):
-        self._load_prefs()
         if self.auto_update_var.get():
             threading.Thread(target=self._do_check_update,
                              args=(False,), daemon=True).start()
@@ -761,7 +767,8 @@ class PDFOcrApp(tk.Tk):
 
                 c.save()
                 page_buffers.append(buf.getvalue())
-                self.progress_var.set(i / total * 95)
+                pct = i / total * 95
+                self.after(0, lambda p=pct: self.progress_var.set(p))
 
             self._spinner_status("Gerando PDF final...")
             self._set_status("Gerando PDF final...")
@@ -771,7 +778,7 @@ class PDFOcrApp(tk.Tk):
             with open(output_pdf, "wb") as f:
                 merger.write(f)
 
-            self.progress_var.set(100)
+            self.after(0, lambda: self.progress_var.set(100))
             self._set_status(f"Concluído! {os.path.basename(output_pdf)}")
             self.after(0, self._close_spinner)
             self.after(0, lambda: messagebox.showinfo(
@@ -788,12 +795,14 @@ class PDFOcrApp(tk.Tk):
             self.after(0, lambda: self.btn_run.config(state="normal"))
 
     def _spinner_status(self, msg):
-        if self._spinner:
-            self.after(0, lambda: self._spinner.set_status(msg))
+        sp = self._spinner
+        if sp:
+            self.after(0, lambda: sp.set_status(msg) if sp._running else None)
 
     def _spinner_page(self, current, total):
-        if self._spinner:
-            self.after(0, lambda: self._spinner.set_page(current, total))
+        sp = self._spinner
+        if sp:
+            self.after(0, lambda: sp.set_page(current, total) if sp._running else None)
 
     def _close_spinner(self):
         if self._spinner:

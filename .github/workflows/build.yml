@@ -147,17 +147,6 @@ jobs:
         with:
           files: dist/PDF_OCR.exe
           name: "PDF OCR ${{ github.ref_name }}"
-          body: |
-            ## PDF OCR ${{ github.ref_name }}
-
-            ### Download
-            Baixe o `PDF_OCR.exe` e execute diretamente — **sem instalar nada**.
-            Tesseract OCR e Poppler já estão embutidos no executável.
-
-            ### Novidades desta versão
-            - Janela de atualização com changelog completo ao detectar nova versão
-            - Download e aplicação automática do update com barra de progresso
-            - Projeto estruturado para VS Code
-            - Tesseract e Poppler embutidos no EXE
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
