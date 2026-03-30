@@ -605,6 +605,128 @@ del "%~f0"
         messagebox.showerror("Falha no download", msg, parent=self)
 
 
+def _flat_btn(parent, text, command, font=None, **kw):
+    font = font or ("Segoe UI", 10)
+    btn = tk.Button(
+        parent, text=text, command=command,
+        bg=C["input"], fg=C["fg"],
+        activebackground=C["hover"], activeforeground=C["fg_bright"],
+        relief="flat", bd=0, cursor="hand2",
+        font=font, **kw
+    )
+    return btn
+
+
+class LicenseDialog(tk.Toplevel):
+    """Tela de ativação de licença mostrada quando não há licença válida."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Ativar PDF OCR")
+        self.resizable(False, False)
+        self.configure(bg=C["bg"])
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.result = False  # True se ativação ok
+
+        hw_id = _get_hw_id()
+
+        # ── Layout ──────────────────────────────────────────────
+        wrap = tk.Frame(self, bg=C["bg"], padx=32, pady=24)
+        wrap.pack()
+
+        tk.Label(wrap, text="PDF OCR", font=("Segoe UI", 18, "bold"),
+                 bg=C["bg"], fg=C["accent"]).pack(pady=(0, 4))
+        tk.Label(wrap, text="Ativação de Licença",
+                 font=("Segoe UI", 11), bg=C["bg"], fg=C["fg"]).pack(pady=(0, 20))
+
+        # Hardware ID (somente leitura, para o usuário enviar ao admin)
+        hw_frame = tk.Frame(wrap, bg=C["panel"], bd=0, highlightthickness=1,
+                            highlightbackground=C["border"])
+        hw_frame.pack(fill="x", pady=(0, 16))
+        tk.Label(hw_frame, text="Seu ID de computador:",
+                 bg=C["panel"], fg=C["fg_dim"],
+                 font=("Segoe UI", 8), anchor="w").pack(fill="x", padx=10, pady=(8, 0))
+        hw_entry = tk.Entry(hw_frame, font=("Consolas", 9))
+        _style_entry(hw_entry)
+        hw_entry.configure(state="normal")
+        hw_entry.insert(0, hw_id)
+        hw_entry.configure(state="readonly")
+        hw_entry.pack(fill="x", padx=10, pady=(2, 8))
+
+        # Botão copiar ID
+        def _copy_hw():
+            self.clipboard_clear()
+            self.clipboard_append(hw_id)
+            copy_btn.configure(text="Copiado!")
+            self.after(2000, lambda: copy_btn.configure(text="Copiar ID"))
+        copy_btn = _flat_btn(hw_frame, "Copiar ID", _copy_hw,
+                             font=("Segoe UI", 8))
+        copy_btn.configure(bg=C["input"])
+        copy_btn.pack(anchor="e", padx=10, pady=(0, 8))
+
+        # Campo de chave
+        tk.Label(wrap, text="Chave de licença:",
+                 bg=C["bg"], fg=C["fg"], font=("Segoe UI", 10), anchor="w").pack(fill="x")
+        self.key_entry = tk.Entry(wrap, font=("Consolas", 11), width=36)
+        _style_entry(self.key_entry)
+        self.key_entry.pack(fill="x", pady=(4, 4))
+        self.key_entry.bind("<Return>", lambda _: self._activate())
+
+        # Exemplo de formato
+        tk.Label(wrap, text="Formato: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
+                 bg=C["bg"], fg=C["fg_dim"], font=("Segoe UI", 8)).pack(anchor="w")
+
+        # Status
+        self.status_var = tk.StringVar()
+        self.status_lbl = tk.Label(wrap, textvariable=self.status_var,
+                                   bg=C["bg"], fg=C["error"],
+                                   font=("Segoe UI", 9), wraplength=320)
+        self.status_lbl.pack(pady=(8, 0))
+
+        # Botão ativar
+        self.activate_btn = _accent_btn(wrap, "Ativar", self._activate,
+                                        font=("Segoe UI", 11, "bold"))
+        self.activate_btn.pack(fill="x", pady=(16, 0), ipady=6)
+
+        self._center()
+
+    def _center(self):
+        self.update_idletasks()
+        w, h = self.winfo_width(), self.winfo_height()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        self.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
+
+    def _activate(self):
+        key = self.key_entry.get().strip().upper()
+        if not key:
+            self.status_var.set("Digite a chave de licença.")
+            return
+        self.activate_btn.configure(state="disabled", text="Verificando...")
+        self.status_var.set("")
+        hw_id = _get_hw_id()
+
+        def _check():
+            ok, msg = validate_license_online(key, hw_id)
+            def _done():
+                self.activate_btn.configure(state="normal", text="Ativar")
+                if ok:
+                    _save_license(key, hw_id)
+                    self.result = True
+                    self.destroy()
+                else:
+                    self.status_lbl.configure(fg=C["error"])
+                    self.status_var.set(f"Erro: {msg}")
+            self.after(0, _done)
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _on_close(self):
+        self.result = False
+        self.destroy()
+
+
 # ─────────────────────────────────────────────────────────────
 #  Main App
 # ─────────────────────────────────────────────────────────────
