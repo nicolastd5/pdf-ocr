@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag da release (ex: v0.9.2)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -159,11 +167,26 @@ jobs:
           name: PDF_OCR_Windows
           path: dist/PDF_OCR.exe
 
+      - name: Resolve release tag
+        id: resolve_tag
+        shell: pwsh
+        run: |
+          $tag = ""
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+          } elseif ("${{ github.event.inputs.tag }}" -ne "") {
+            $tag = "${{ github.event.inputs.tag }}"
+          }
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          echo "publish=$(if ($tag) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+
       - name: Create GitHub Release
+        if: steps.resolve_tag.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.resolve_tag.outputs.tag }}
           files: dist/PDF_OCR.exe
-          name: "PDF OCR ${{ github.ref_name }}"
+          name: "PDF OCR ${{ steps.resolve_tag.outputs.tag }}"
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
