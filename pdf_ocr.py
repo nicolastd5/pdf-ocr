@@ -31,7 +31,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.9.5"
+APP_VERSION = "0.9.6"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -579,6 +579,8 @@ class PDFOcrApp(tk.Tk):
     _NAV = [
         ("ocr",      "⬡", "OCR"),
         ("compress", "⊜", "Comprimir"),
+        ("split",    "⊟", "Dividir"),
+        ("merge",    "⊞", "Juntar"),
         ("about",    "ℹ", "Sobre"),
     ]
 
@@ -739,6 +741,8 @@ class PDFOcrApp(tk.Tk):
 
         self._build_ocr_page()
         self._build_compress_page()
+        self._build_coming_soon_page("split")
+        self._build_coming_soon_page("merge")
         self._build_about_page()
 
     def _show_page(self, key):
@@ -758,9 +762,11 @@ class PDFOcrApp(tk.Tk):
                 btn.config(fg=C["fg_dim"], bg=C["sidebar"])
 
         titles = {
-            "ocr":      ("OCR",       "Converta PDFs escaneados em PDFs pesquisáveis"),
-            "compress": ("Comprimir", "Reduza o tamanho de PDFs existentes"),
-            "about":    ("Sobre",     f"PDF OCR  v{APP_VERSION}"),
+            "ocr":      ("OCR",        "Converta PDFs escaneados em PDFs pesquisáveis"),
+            "compress": ("Comprimir",  "Reduza o tamanho de PDFs existentes"),
+            "split":    ("Dividir PDF","Separe um PDF em partes individuais"),
+            "merge":    ("Juntar PDF", "Una múltiplos PDFs em um único arquivo"),
+            "about":    ("Sobre",      f"PDF OCR  v{APP_VERSION}"),
         }
         t, s = titles[key]
         self._page_title.config(text=t)
@@ -1193,6 +1199,62 @@ class PDFOcrApp(tk.Tk):
 
         self._compress_running = False
         self.after(0, lambda: self.btn_compress.config(state="normal"))
+
+    # ── Em breve ──────────────────────────────────────────────
+
+    def _build_coming_soon_page(self, key):
+        _ICONS  = {"split": "⊟", "merge": "⊞"}
+        _TITLES = {
+            "split": "Dividir PDF",
+            "merge": "Juntar PDF",
+        }
+        _DESCS  = {
+            "split": "Separe um PDF em partes ou páginas individuais.",
+            "merge": "Una múltiplos PDFs em um único arquivo.",
+        }
+
+        page = tk.Frame(self._pages, bg=C["bg"])
+        self._page_frames[key] = page
+
+        # Centraliza verticalmente
+        page.rowconfigure(0, weight=1)
+        page.rowconfigure(2, weight=1)
+        page.columnconfigure(0, weight=1)
+
+        card = tk.Frame(page, bg=C["panel"],
+                        highlightthickness=1,
+                        highlightbackground=C["border"])
+        card.grid(row=1, column=0, padx=60, pady=20, sticky="ew")
+
+        inner = tk.Frame(card, bg=C["panel"], padx=40, pady=36)
+        inner.pack()
+
+        tk.Label(inner, text=_ICONS[key],
+                 font=("Segoe UI", 36), bg=C["panel"],
+                 fg=C["accent"]).pack(pady=(0, 12))
+
+        tk.Label(inner, text=_TITLES[key],
+                 font=("Segoe UI", 16, "bold"),
+                 bg=C["panel"], fg=C["fg_bright"]).pack()
+
+        tk.Label(inner, text=_DESCS[key],
+                 font=("Segoe UI", 10), bg=C["panel"],
+                 fg=C["fg"], pady=6).pack()
+
+        tk.Frame(inner, bg=C["border"], height=1,
+                 width=260).pack(pady=(14, 14))
+
+        badge = tk.Frame(inner, bg=C["accent_dk"],
+                         padx=16, pady=6)
+        badge.pack()
+        tk.Label(badge, text="Em breve",
+                 font=("Segoe UI", 10, "bold"),
+                 bg=C["accent_dk"], fg=C["fg_bright"]).pack()
+
+        tk.Label(inner,
+                 text="Esta funcionalidade está em desenvolvimento\ne será disponibilizada em uma próxima versão.",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"], justify="center").pack(pady=(16, 0))
 
     # ── Página Sobre ──────────────────────────────────────────
 
