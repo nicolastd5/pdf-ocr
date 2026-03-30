@@ -128,12 +128,22 @@ def version_tuple(v):
         return (0,)
 
 
-def _make_ssl_ctx():
-    """Retorna um SSLContext verificado; cai para não-verificado se necessário."""
+def _urlopen_ssl(req, timeout=15):
+    """
+    Tenta urlopen com verificação SSL; se falhar por certificado,
+    refaz sem verificação (comum em Windows sem bundle de CAs atualizado).
+    """
     try:
-        return ssl.create_default_context()
-    except Exception:
-        return ssl._create_unverified_context()
+        ctx = ssl.create_default_context()
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+    except ssl.SSLError:
+        ctx = ssl._create_unverified_context()
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+    except urllib.error.URLError as e:
+        if isinstance(getattr(e, "reason", None), ssl.SSLError):
+            ctx = ssl._create_unverified_context()
+            return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        raise
 
 
 def fetch_latest_release():
@@ -141,13 +151,7 @@ def fetch_latest_release():
         GITHUB_RELEASES_API,
         headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"}
     )
-    try:
-        ctx = _make_ssl_ctx()
-        opener = urllib.request.urlopen(req, timeout=15, context=ctx)
-    except TypeError:
-        # Python antigo sem parâmetro context
-        opener = urllib.request.urlopen(req, timeout=15)
-    with opener as resp:
+    with _urlopen_ssl(req, timeout=15) as resp:
         data = json.loads(resp.read().decode())
 
     tag  = data.get("tag_name", "").lstrip("v")
@@ -485,11 +489,7 @@ class UpdateDialog(tk.Toplevel):
             tmp_dir = tempfile.mkdtemp(prefix="pdfocr_update_")
             tmp_exe = os.path.join(tmp_dir, "PDF_OCR_new.exe")
             req = urllib.request.Request(url, headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"})
-            try:
-                _resp_ctx = urllib.request.urlopen(req, timeout=300, context=_make_ssl_ctx())
-            except TypeError:
-                _resp_ctx = urllib.request.urlopen(req, timeout=300)
-            with _resp_ctx as resp:
+            with _urlopen_ssl(req, timeout=300) as resp:
                 total      = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 chunk      = 65536
