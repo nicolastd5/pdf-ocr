@@ -30,7 +30,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.3"
+APP_VERSION = "0.4"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -52,7 +52,7 @@ def check_tesseract():
     bundled = _bundled_bin("tesseract.exe")
     if bundled:
         pytesseract.pytesseract.tesseract_cmd = bundled
-        os.environ.setdefault("TESSDATA_PREFIX", os.path.dirname(bundled))
+        os.environ["TESSDATA_PREFIX"] = os.path.dirname(bundled)
         return True
     common_paths = [
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
@@ -77,8 +77,9 @@ def find_poppler():
         bundled_dir = os.path.join(sys._MEIPASS, "poppler", "bin")
         if os.path.isdir(bundled_dir):
             return bundled_dir
-    if shutil.which("pdftoppm"):
-        return None
+    else:
+        if shutil.which("pdftoppm"):
+            return None
     for p in [
         r"C:\Program Files\poppler\Library\bin",
         r"C:\Program Files\poppler-24\Library\bin",
@@ -198,8 +199,14 @@ class SpinnerWindow(tk.Toplevel):
                 self.after_cancel(self._after_id)
             except Exception:
                 pass
-        self.grab_release()
-        self.destroy()
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
     def set_status(self, msg):
         self.status_var.set(msg)
@@ -291,7 +298,8 @@ class UpdateDialog(tk.Toplevel):
         self._prog_frame.pack_forget()   # escondido por padrão
 
         # Botões
-        btn_row = tk.Frame(self, bg=self._BG, padx=28, pady=16)
+        self._btn_row = tk.Frame(self, bg=self._BG, padx=28, pady=16)
+        btn_row = self._btn_row
         btn_row.pack(fill="x")
         self._btn_update = tk.Button(
             btn_row,
@@ -333,7 +341,7 @@ class UpdateDialog(tk.Toplevel):
             return
 
         self._btn_update.config(state="disabled", text="Baixando...")
-        self._prog_frame.pack(fill="x", padx=28, pady=(0, 4))
+        self._prog_frame.pack(fill="x", before=self._btn_row, padx=28, pady=(0, 4))
         threading.Thread(target=self._download_and_apply,
                          args=(exe_url,), daemon=True).start()
 
@@ -382,8 +390,13 @@ class UpdateDialog(tk.Toplevel):
             bat_path = os.path.join(tempfile.gettempdir(), "pdfocr_update.bat")
             with open(bat_path, "w") as f:
                 f.write(f"""@echo off
-ping 127.0.0.1 -n 3 > nul
+ping 127.0.0.1 -n 6 > nul
 copy /Y "{new_exe}" "{current_exe}"
+if errorlevel 1 (
+    echo Falha ao copiar o executavel. Tente manualmente.
+    pause
+    goto :eof
+)
 start "" "{current_exe}"
 del "%~f0"
 """)
@@ -404,7 +417,6 @@ del "%~f0"
                          creationflags=subprocess.CREATE_NO_WINDOW,
                          close_fds=True)
         self._parent.quit()
-        self._parent.destroy()
 
     def _download_failed(self, msg):
         self._btn_update.config(state="normal", text="Sim, atualizar agora")
@@ -565,7 +577,7 @@ class PDFOcrApp(tk.Tk):
         self.btn_update.pack(pady=(10, 0))
 
         tk.Label(f,
-                 text=f"© 2025 {GITHUB_USER}  •  MIT License",
+                 text="© 2025 Nicolas Almeida Hader Dias  •  MIT License",
                  font=("Segoe UI", 8), bg="#f5f5f5", fg="#aaa").pack(
             side="bottom", pady=12)
 
@@ -721,7 +733,7 @@ class PDFOcrApp(tk.Tk):
                 for j in range(len(ocr_data["text"])):
                     word = ocr_data["text"][j]
                     conf = int(ocr_data["conf"][j])
-                    if not word.strip() or conf < 0:
+                    if not word.strip() or conf <= 0:
                         continue
                     x, y = ocr_data["left"][j], ocr_data["top"][j]
                     w, h = ocr_data["width"][j], ocr_data["height"][j]
@@ -787,9 +799,10 @@ class PDFOcrApp(tk.Tk):
         self.after(0, lambda: self.status.set(msg))
 
     def _show_dep_error(self):
+        missing = MISSING_DEP if not DEPS_OK else "dependência desconhecida"
         messagebox.showerror(
             "Dependências faltando",
-            f"Biblioteca não instalada: {MISSING_DEP}\n\n"
+            f"Biblioteca não instalada: {missing}\n\n"
             "Execute:\npip install pytesseract pillow pdf2image reportlab PyPDF2"
         )
 
