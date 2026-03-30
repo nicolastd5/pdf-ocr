@@ -30,8 +30,9 @@ jobs:
         run: |
           choco install tesseract --yes --no-progress `
             --params "'/Components:por /Components:eng'"
-          # Aguarda finalização
+          # Aguarda finalização e atualiza PATH
           Start-Sleep -Seconds 10
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 
       - name: Locate and copy Tesseract to deps/
         shell: pwsh
@@ -44,10 +45,26 @@ jobs:
             # Fallback: caminhos padrão do choco
             $candidates = @(
               "C:\Program Files\Tesseract-OCR",
-              "C:\tools\tesseract"
+              "C:\tools\tesseract",
+              "C:\ProgramData\chocolatey\bin"
             )
             $tessDir = $candidates | Where-Object { Test-Path "$_\tesseract.exe" } | Select-Object -First 1
           }
+
+          # Último recurso: busca recursiva
+          if (-not $tessDir -or -not (Test-Path "$tessDir\tesseract.exe")) {
+            Write-Host "Buscando tesseract.exe recursivamente..."
+            $found = Get-ChildItem "C:\Program Files", "C:\ProgramData\chocolatey", "C:\tools" `
+                       -Recurse -Filter "tesseract.exe" -ErrorAction SilentlyContinue |
+                       Select-Object -First 1
+            if ($found) {
+              $tessDir = $found.DirectoryName
+            } else {
+              Write-Error "Tesseract não encontrado! Abortando."
+              exit 1
+            }
+          }
+
           Write-Host "Tesseract dir: $tessDir"
 
           New-Item -ItemType Directory -Path deps\tesseract -Force | Out-Null
