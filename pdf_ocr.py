@@ -30,7 +30,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.5"
+APP_VERSION = "0.6"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -394,6 +394,7 @@ class UpdateDialog(tk.Toplevel):
         if current_exe and os.path.isfile(current_exe):
             pid = os.getpid()
             bat_path = os.path.join(tempfile.gettempdir(), "pdfocr_update.bat")
+            old_exe = current_exe + ".old"
             with open(bat_path, "w") as f:
                 f.write(f"""@echo off
 :wait
@@ -402,13 +403,21 @@ if not errorlevel 1 (
     ping 127.0.0.1 -n 2 > nul
     goto wait
 )
-copy /Y "{new_exe}" "{current_exe}"
+ping 127.0.0.1 -n 3 > nul
+if exist "{old_exe}" del /F /Q "{old_exe}"
+rename "{current_exe}" "{os.path.basename(old_exe)}"
 if errorlevel 1 (
+    msg * "PDF OCR: falha ao renomear executável. Copie manualmente: {new_exe}"
+    goto :eof
+)
+move /Y "{new_exe}" "{current_exe}"
+if errorlevel 1 (
+    rename "{old_exe}" "{os.path.basename(current_exe)}"
     msg * "PDF OCR: falha ao instalar atualização. Copie manualmente: {new_exe}"
     goto :eof
 )
+del /F /Q "{old_exe}" 2>nul
 start "" "{current_exe}"
-del "{new_exe}"
 del "%~f0"
 """)
             self._prog_label.config(text="Instalando atualização...")
