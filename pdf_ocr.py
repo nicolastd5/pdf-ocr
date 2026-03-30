@@ -31,7 +31,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.9.4"
+APP_VERSION = "0.9.5"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -582,6 +582,21 @@ class PDFOcrApp(tk.Tk):
         ("about",    "ℹ", "Sobre"),
     ]
 
+    # Presets de qualidade: (label_exibição, dpi, jpeg_quality)
+    _QUALITY_PRESETS = [
+        ("Máxima compressão  —  100 DPI · JPEG 40%",  100, 40),
+        ("Baixa              —  120 DPI · JPEG 55%",  120, 55),
+        ("Média              —  150 DPI · JPEG 65%",  150, 65),
+        ("Alta               —  200 DPI · JPEG 80%",  200, 80),
+        ("Muito alta         —  250 DPI · JPEG 88%",  250, 88),
+    ]
+
+    # Formatos de imagem embutida: (label_exibição, fmt_PIL, sufixo_tmp)
+    _IMG_FORMATS = [
+        ("JPEG — menor tamanho (com perda)",  "JPEG", ".jpg"),
+        ("PNG  — sem perda de qualidade",     "PNG",  ".png"),
+    ]
+
     def __init__(self):
         super().__init__()
         self.title(f"PDF OCR  v{APP_VERSION}")
@@ -604,6 +619,11 @@ class PDFOcrApp(tk.Tk):
         self.compress_outdir     = tk.StringVar()
         self.compress_status     = tk.StringVar(value="Adicione PDFs para comprimir.")
         self._compress_running   = False
+        # índice default = Média (posição 2)
+        self.compress_quality    = tk.StringVar(
+            value=self._QUALITY_PRESETS[2][0])
+        self.compress_format     = tk.StringVar(
+            value=self._IMG_FORMATS[0][0])
 
         # ── Geral ────────────────────────────────────────────
         self.auto_update_var = tk.BooleanVar(value=True)
@@ -944,13 +964,30 @@ class PDFOcrApp(tk.Tk):
                  font=("Segoe UI", 8), bg=C["panel"],
                  fg=C["fg_dim"]).pack(side="left", padx=(8, 0))
 
-        # ── Nota ─────────────────────────────────────────────
-        info_f = tk.Frame(card, bg=C["panel"])
-        info_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 14))
-        tk.Label(info_f,
-                 text="150 DPI · JPEG 65% · reduz significativamente o tamanho do arquivo",
-                 font=("Segoe UI", 8), bg=C["panel"], fg=C["fg_dim"],
-                 justify="left").pack(anchor="w")
+        # ── Qualidade + Formato ───────────────────────────────
+        qf_f = tk.Frame(card, bg=C["panel"])
+        qf_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
+
+        tk.Label(qf_f, text="Qualidade", width=13, anchor="w",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
+        quality_combo = ttk.Combobox(
+            qf_f, textvariable=self.compress_quality,
+            values=[p[0] for p in self._QUALITY_PRESETS],
+            state="readonly", width=38, font=("Segoe UI", 9))
+        quality_combo.pack(side="left", ipady=4)
+
+        fmt_f = tk.Frame(card, bg=C["panel"])
+        fmt_f.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 14))
+
+        tk.Label(fmt_f, text="Formato", width=13, anchor="w",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
+        fmt_combo = ttk.Combobox(
+            fmt_f, textvariable=self.compress_format,
+            values=[f[0] for f in self._IMG_FORMATS],
+            state="readonly", width=38, font=("Segoe UI", 9))
+        fmt_combo.pack(side="left", ipady=4)
 
         # ── Status + barra + botões ───────────────────────────
         bottom = tk.Frame(page, bg=C["bg"])
@@ -1024,21 +1061,38 @@ class PDFOcrApp(tk.Tk):
             return
         if self._compress_running:
             return
+
+        # Resolve preset de qualidade
+        q_label = self.compress_quality.get()
+        dpi, jpeg_q = next(
+            ((p[1], p[2]) for p in self._QUALITY_PRESETS if p[0] == q_label),
+            (150, 65))
+
+        # Resolve formato
+        f_label = self.compress_format.get()
+        img_fmt, tmp_suffix = next(
+            ((f[1], f[2]) for f in self._IMG_FORMATS if f[0] == f_label),
+            ("JPEG", ".jpg"))
+
         self._compress_running = True
         self.btn_compress.config(state="disabled")
         self.compress_pb.set(0)
         threading.Thread(
             target=self._run_compress_batch,
-            args=(list(self.compress_files), self.compress_outdir.get()),
+            args=(list(self.compress_files), self.compress_outdir.get(),
+                  dpi, jpeg_q, img_fmt, tmp_suffix),
             daemon=True,
         ).start()
 
-    def _run_compress_single(self, input_pdf, output_pdf, fi, total_files):
+    def _run_compress_single(self, input_pdf, output_pdf,
+                             fi, total_files,
+                             dpi=150, jpeg_q=65,
+                             img_fmt="JPEG", tmp_suffix=".jpg"):
         """Comprime um único arquivo. Retorna (orig_kb, new_kb) ou levanta exceção."""
         tmp_files = []
         try:
             poppler_path = find_poppler()
-            pages = convert_from_path(input_pdf, dpi=150,
+            pages = convert_from_path(input_pdf, dpi=dpi,
                                       poppler_path=poppler_path)
             total_pages = len(pages)
             page_buffers = []
@@ -1052,11 +1106,17 @@ class PDFOcrApp(tk.Tk):
                            self.compress_status.set(m))
 
                 img_w, img_h = pil_img.size
-                tf = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+                tf = tempfile.NamedTemporaryFile(
+                    suffix=tmp_suffix, delete=False)
                 tmp_files.append(tf.name)
-                pil_img.convert("RGB").save(
-                    tf, format="JPEG", quality=65, optimize=True,
-                    progressive=True)
+
+                img_rgb = pil_img.convert("RGB")
+                if img_fmt == "JPEG":
+                    img_rgb.save(tf, format="JPEG", quality=jpeg_q,
+                                 optimize=True, progressive=True)
+                else:  # PNG
+                    img_rgb.save(tf, format="PNG",
+                                 compress_level=9, optimize=True)
                 tf.close()
 
                 buf = io.BytesIO()
@@ -1083,7 +1143,9 @@ class PDFOcrApp(tk.Tk):
                 except Exception:
                     pass
 
-    def _run_compress_batch(self, files, outdir):
+    def _run_compress_batch(self, files, outdir,
+                            dpi=150, jpeg_q=65,
+                            img_fmt="JPEG", tmp_suffix=".jpg"):
         total = len(files)
         results, errors = [], []
 
@@ -1093,7 +1155,8 @@ class PDFOcrApp(tk.Tk):
             output_pdf = os.path.join(dest_dir, base + "_comprimido.pdf")
             try:
                 orig_kb, new_kb = self._run_compress_single(
-                    input_pdf, output_pdf, fi, total)
+                    input_pdf, output_pdf, fi, total,
+                    dpi, jpeg_q, img_fmt, tmp_suffix)
                 ratio = (1 - new_kb / orig_kb) * 100 if orig_kb > 0 else 0
                 results.append((os.path.basename(input_pdf),
                                  orig_kb, new_kb, ratio))
@@ -1230,16 +1293,24 @@ class PDFOcrApp(tk.Tk):
                 data = json.load(f)
             self.auto_update_var.set(data.get("auto_update", True))
             self.highlight_names_var.set(data.get("highlight_names", True))
+            q = data.get("compress_quality")
+            if q and any(p[0] == q for p in self._QUALITY_PRESETS):
+                self.compress_quality.set(q)
+            f = data.get("compress_format")
+            if f and any(x[0] == f for x in self._IMG_FORMATS):
+                self.compress_format.set(f)
         except Exception:
             pass
 
     def _save_prefs(self):
         try:
-            with open(self._prefs_path(), "w") as f:
+            with open(self._prefs_path(), "w") as fp:
                 json.dump({
-                    "auto_update": self.auto_update_var.get(),
-                    "highlight_names": self.highlight_names_var.get(),
-                }, f)
+                    "auto_update":      self.auto_update_var.get(),
+                    "highlight_names":  self.highlight_names_var.get(),
+                    "compress_quality": self.compress_quality.get(),
+                    "compress_format":  self.compress_format.get(),
+                }, fp)
         except Exception:
             pass
 
