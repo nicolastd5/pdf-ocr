@@ -31,7 +31,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.9.3"
+APP_VERSION = "0.9.4"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -585,24 +585,29 @@ class PDFOcrApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"PDF OCR  v{APP_VERSION}")
-        self.geometry("740x520")
-        self.minsize(740, 520)
-        self.resizable(True, False)
+        self.geometry("760x640")
+        self.minsize(760, 580)
+        self.resizable(True, True)
         self.configure(bg=C["bg"])
 
-        self.input_path           = tk.StringVar()
-        self.output_path          = tk.StringVar()
-        self.lang                 = tk.StringVar(value="por")
-        self.status               = tk.StringVar(value="Aguardando arquivo...")
-        self.progress_var         = tk.DoubleVar(value=0)
-        self.auto_update_var      = tk.BooleanVar(value=True)
-        self.update_status        = tk.StringVar(value="")
-        self.highlight_names_var  = tk.BooleanVar(value=True)
-        self.compress_input_path  = tk.StringVar()
-        self.compress_output_path = tk.StringVar()
-        self.compress_status      = tk.StringVar(value="Selecione um PDF para comprimir.")
-        self._compress_running    = False
-        self._running        = False
+        # ── OCR ──────────────────────────────────────────────
+        self.ocr_files           = []          # lista de caminhos
+        self.ocr_outdir          = tk.StringVar()
+        self.lang                = tk.StringVar(value="por")
+        self.status              = tk.StringVar(value="Adicione PDFs para iniciar.")
+        self.progress_var        = tk.DoubleVar(value=0)
+        self.highlight_names_var = tk.BooleanVar(value=True)
+        self._running            = False
+
+        # ── Comprimir ────────────────────────────────────────
+        self.compress_files      = []
+        self.compress_outdir     = tk.StringVar()
+        self.compress_status     = tk.StringVar(value="Adicione PDFs para comprimir.")
+        self._compress_running   = False
+
+        # ── Geral ────────────────────────────────────────────
+        self.auto_update_var = tk.BooleanVar(value=True)
+        self.update_status   = tk.StringVar(value="")
         self._spinner        = None
         self._active_page    = None
         self._page_frames    = {}
@@ -746,35 +751,82 @@ class PDFOcrApp(tk.Tk):
     def _build_ocr_page(self):
         page = tk.Frame(self._pages, bg=C["bg"])
         self._page_frames["ocr"] = page
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, weight=1)
 
-        # card principal
+        # card principal — expande verticalmente
         card = tk.Frame(page, bg=C["panel"],
                         highlightthickness=1,
                         highlightbackground=C["border"])
-        card.pack(fill="x", padx=24, pady=20)
+        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.columnconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)   # row da listbox expande
 
-        def row(label, var, browse_cmd, btn_text):
-            f = tk.Frame(card, bg=C["panel"])
-            f.pack(fill="x", padx=16, pady=(12, 0))
-            tk.Label(f, text=label, width=13, anchor="w",
-                     font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
-            e = tk.Entry(f, textvariable=var, state="readonly",
-                         font=("Segoe UI", 9), width=46)
-            _style_entry(e)
-            e.pack(side="left", ipady=5, padx=(0, 8))
-            _flat_btn(f, text=btn_text, command=browse_cmd,
-                      padx=10, pady=4).pack(side="left")
+        # ── Cabeçalho da lista ────────────────────────────────
+        hdr = tk.Frame(card, bg=C["panel"])
+        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 4))
+        tk.Label(hdr, text="Arquivos PDF para OCR",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
+        self._ocr_count_lbl = tk.Label(
+            hdr, text="(0 arquivo)", font=("Segoe UI", 9),
+            bg=C["panel"], fg=C["fg_dim"])
+        self._ocr_count_lbl.pack(side="left", padx=(6, 0))
+        _flat_btn(hdr, "✕ Remover", self._ocr_remove_selected,
+                  padx=8, pady=2).pack(side="right")
+        _flat_btn(hdr, "+ Adicionar", self._ocr_add_files,
+                  padx=8, pady=2).pack(side="right", padx=(0, 4))
 
-        row("PDF de entrada", self.input_path,  self._browse_input,  "Abrir")
-        row("PDF de saída",   self.output_path, self._browse_output, "Salvar")
+        # ── Listbox ───────────────────────────────────────────
+        list_f = tk.Frame(card, bg=C["panel"])
+        list_f.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 8))
+        list_f.columnconfigure(0, weight=1)
+        list_f.rowconfigure(0, weight=1)
 
-        # idioma
-        lang_f = tk.Frame(card, bg=C["panel"])
-        lang_f.pack(fill="x", padx=16, pady=(12, 16))
-        tk.Label(lang_f, text="Idioma OCR", width=13, anchor="w",
-                 font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
-        lang_combo = ttk.Combobox(lang_f, textvariable=self.lang,
-                                  width=30, state="readonly",
+        sb_ocr = ttk.Scrollbar(list_f, orient="vertical",
+                               style="Dark.Vertical.TScrollbar")
+        self.ocr_listbox = tk.Listbox(
+            list_f,
+            bg=C["input"], fg=C["fg"],
+            selectbackground=C["sel"], selectforeground=C["fg_bright"],
+            relief="flat", highlightthickness=1,
+            highlightbackground=C["border"],
+            highlightcolor=C["accent"],
+            font=("Segoe UI", 9), activestyle="none",
+            selectmode="extended",
+            yscrollcommand=sb_ocr.set,
+        )
+        sb_ocr.config(command=self.ocr_listbox.yview)
+        self.ocr_listbox.grid(row=0, column=0, sticky="nsew")
+        sb_ocr.grid(row=0, column=1, sticky="ns")
+        # Drag-and-drop (double-click to remove individual)
+        self.ocr_listbox.bind("<Double-Button-1>", lambda _: self._ocr_remove_selected())
+
+        # ── Pasta de saída (opcional) ─────────────────────────
+        outdir_f = tk.Frame(card, bg=C["panel"])
+        outdir_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+        tk.Label(outdir_f, text="Pasta de saída", width=13, anchor="w",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
+        e_outdir = tk.Entry(outdir_f, textvariable=self.ocr_outdir,
+                            state="readonly", font=("Segoe UI", 9), width=42)
+        _style_entry(e_outdir)
+        e_outdir.pack(side="left", ipady=4, padx=(0, 8))
+        _flat_btn(outdir_f, "Pasta", self._browse_ocr_outdir,
+                  padx=10, pady=3).pack(side="left")
+        tk.Label(outdir_f, text="(vazio = mesma pasta do PDF)",
+                 font=("Segoe UI", 8), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left", padx=(8, 0))
+
+        # ── Idioma + opções ───────────────────────────────────
+        cfg_f = tk.Frame(card, bg=C["panel"])
+        cfg_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 14))
+
+        tk.Label(cfg_f, text="Idioma OCR", width=13, anchor="w",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
+        lang_combo = ttk.Combobox(cfg_f, textvariable=self.lang,
+                                  width=26, state="readonly",
                                   font=("Segoe UI", 9))
         lang_combo["values"] = [
             "por — Português",
@@ -785,41 +837,39 @@ class PDFOcrApp(tk.Tk):
             "deu — Alemão",
         ]
         lang_combo.current(0)
-        lang_combo.pack(side="left", ipady=4)
+        lang_combo.pack(side="left", ipady=4, padx=(0, 20))
         lang_combo.bind("<<ComboboxSelected>>", self._on_lang_select)
 
-        # opções extras
-        opts_f = tk.Frame(card, bg=C["panel"])
-        opts_f.pack(fill="x", padx=16, pady=(4, 16))
         ttk.Checkbutton(
-            opts_f,
+            cfg_f,
             text="Destacar nomes de pessoas no PDF",
             variable=self.highlight_names_var,
             style="TCheckbutton",
-            command=self._save_prefs
+            command=self._save_prefs,
         ).pack(side="left")
 
-        # status + barra de progresso
-        status_f = tk.Frame(page, bg=C["bg"])
-        status_f.pack(fill="x", padx=24, pady=(4, 6))
-        tk.Label(status_f, textvariable=self.status,
+        # ── Status + barra + botões (fixos na base) ───────────
+        bottom = tk.Frame(page, bg=C["bg"])
+        bottom.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        bottom.columnconfigure(0, weight=1)
+
+        tk.Label(bottom, textvariable=self.status,
                  font=("Segoe UI", 9), bg=C["bg"], fg=C["fg_dim"],
-                 anchor="w").pack(fill="x")
+                 anchor="w").grid(row=0, column=0, sticky="ew", pady=(4, 4))
 
-        self.pb = CanvasProgressBar(page, height=6)
-        self.pb.pack(fill="x", padx=24, pady=(0, 16))
+        self.pb = CanvasProgressBar(bottom, height=6)
+        self.pb.grid(row=1, column=0, sticky="ew", pady=(0, 10))
 
-        # botões de ação
-        btn_f = tk.Frame(page, bg=C["bg"])
-        btn_f.pack(fill="x", padx=24)
+        btn_f = tk.Frame(bottom, bg=C["bg"])
+        btn_f.grid(row=2, column=0, sticky="w")
         self.btn_run = _accent_btn(
             btn_f, text="  ▶  Iniciar OCR  ",
             command=self._start,
             font=("Segoe UI", 10, "bold"),
-            padx=18, pady=9
+            padx=18, pady=9,
         )
         self.btn_run.pack(side="left", padx=(0, 10))
-        _flat_btn(btn_f, text="Limpar",
+        _flat_btn(btn_f, text="Limpar lista",
                   command=self._clear,
                   padx=14, pady=9).pack(side="left")
 
@@ -828,98 +878,149 @@ class PDFOcrApp(tk.Tk):
     def _build_compress_page(self):
         page = tk.Frame(self._pages, bg=C["bg"])
         self._page_frames["compress"] = page
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, weight=1)
 
         card = tk.Frame(page, bg=C["panel"],
                         highlightthickness=1,
                         highlightbackground=C["border"])
-        card.pack(fill="x", padx=24, pady=20)
+        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.columnconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)
 
-        def row(label, var, browse_cmd, btn_text):
-            f = tk.Frame(card, bg=C["panel"])
-            f.pack(fill="x", padx=16, pady=(12, 0))
-            tk.Label(f, text=label, width=13, anchor="w",
-                     font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
-            e = tk.Entry(f, textvariable=var, state="readonly",
-                         font=("Segoe UI", 9), width=46)
-            _style_entry(e)
-            e.pack(side="left", ipady=5, padx=(0, 8))
-            _flat_btn(f, text=btn_text, command=browse_cmd,
-                      padx=10, pady=4).pack(side="left")
+        # ── Cabeçalho ─────────────────────────────────────────
+        hdr = tk.Frame(card, bg=C["panel"])
+        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 4))
+        tk.Label(hdr, text="Arquivos PDF para comprimir",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
+        self._cmp_count_lbl = tk.Label(
+            hdr, text="(0 arquivo)", font=("Segoe UI", 9),
+            bg=C["panel"], fg=C["fg_dim"])
+        self._cmp_count_lbl.pack(side="left", padx=(6, 0))
+        _flat_btn(hdr, "✕ Remover", self._compress_remove_selected,
+                  padx=8, pady=2).pack(side="right")
+        _flat_btn(hdr, "+ Adicionar", self._compress_add_files,
+                  padx=8, pady=2).pack(side="right", padx=(0, 4))
 
-        row("PDF de entrada", self.compress_input_path,
-            self._browse_compress_input, "Abrir")
-        row("PDF de saída",   self.compress_output_path,
-            self._browse_compress_output, "Salvar")
+        # ── Listbox ───────────────────────────────────────────
+        list_f = tk.Frame(card, bg=C["panel"])
+        list_f.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 8))
+        list_f.columnconfigure(0, weight=1)
+        list_f.rowconfigure(0, weight=1)
 
-        # Nota informativa
+        sb_cmp = ttk.Scrollbar(list_f, orient="vertical",
+                               style="Dark.Vertical.TScrollbar")
+        self.compress_listbox = tk.Listbox(
+            list_f,
+            bg=C["input"], fg=C["fg"],
+            selectbackground=C["sel"], selectforeground=C["fg_bright"],
+            relief="flat", highlightthickness=1,
+            highlightbackground=C["border"],
+            highlightcolor=C["accent"],
+            font=("Segoe UI", 9), activestyle="none",
+            selectmode="extended",
+            yscrollcommand=sb_cmp.set,
+        )
+        sb_cmp.config(command=self.compress_listbox.yview)
+        self.compress_listbox.grid(row=0, column=0, sticky="nsew")
+        sb_cmp.grid(row=0, column=1, sticky="ns")
+        self.compress_listbox.bind(
+            "<Double-Button-1>", lambda _: self._compress_remove_selected())
+
+        # ── Pasta de saída ────────────────────────────────────
+        outdir_f = tk.Frame(card, bg=C["panel"])
+        outdir_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+        tk.Label(outdir_f, text="Pasta de saída", width=13, anchor="w",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
+        e_cout = tk.Entry(outdir_f, textvariable=self.compress_outdir,
+                          state="readonly", font=("Segoe UI", 9), width=42)
+        _style_entry(e_cout)
+        e_cout.pack(side="left", ipady=4, padx=(0, 8))
+        _flat_btn(outdir_f, "Pasta", self._browse_compress_outdir,
+                  padx=10, pady=3).pack(side="left")
+        tk.Label(outdir_f, text="(vazio = mesma pasta do PDF)",
+                 font=("Segoe UI", 8), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left", padx=(8, 0))
+
+        # ── Nota ─────────────────────────────────────────────
         info_f = tk.Frame(card, bg=C["panel"])
-        info_f.pack(fill="x", padx=16, pady=(10, 16))
+        info_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 14))
         tk.Label(info_f,
-                 text="Converte as páginas para imagem JPEG (150 DPI, qualidade 65%).\n"
-                      "O tamanho do arquivo é reduzido significativamente.",
+                 text="150 DPI · JPEG 65% · reduz significativamente o tamanho do arquivo",
                  font=("Segoe UI", 8), bg=C["panel"], fg=C["fg_dim"],
                  justify="left").pack(anchor="w")
 
-        # Status + barra de progresso
-        status_f = tk.Frame(page, bg=C["bg"])
-        status_f.pack(fill="x", padx=24, pady=(4, 6))
-        tk.Label(status_f, textvariable=self.compress_status,
+        # ── Status + barra + botões ───────────────────────────
+        bottom = tk.Frame(page, bg=C["bg"])
+        bottom.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        bottom.columnconfigure(0, weight=1)
+
+        tk.Label(bottom, textvariable=self.compress_status,
                  font=("Segoe UI", 9), bg=C["bg"], fg=C["fg_dim"],
-                 anchor="w").pack(fill="x")
+                 anchor="w").grid(row=0, column=0, sticky="ew", pady=(4, 4))
 
-        self.compress_pb = CanvasProgressBar(page, height=6)
-        self.compress_pb.pack(fill="x", padx=24, pady=(0, 16))
+        self.compress_pb = CanvasProgressBar(bottom, height=6)
+        self.compress_pb.grid(row=1, column=0, sticky="ew", pady=(0, 10))
 
-        # Botões
-        btn_f = tk.Frame(page, bg=C["bg"])
-        btn_f.pack(fill="x", padx=24)
+        btn_f = tk.Frame(bottom, bg=C["bg"])
+        btn_f.grid(row=2, column=0, sticky="w")
         self.btn_compress = _accent_btn(
-            btn_f, text="  ⊜  Comprimir PDF  ",
+            btn_f, text="  ⊜  Comprimir PDFs  ",
             command=self._start_compress,
             font=("Segoe UI", 10, "bold"),
-            padx=18, pady=9
+            padx=18, pady=9,
         )
         self.btn_compress.pack(side="left", padx=(0, 10))
-        _flat_btn(btn_f, text="Limpar",
+        _flat_btn(btn_f, text="Limpar lista",
                   command=self._clear_compress,
                   padx=14, pady=9).pack(side="left")
 
     # ── Comprimir eventos ─────────────────────────────────────
 
-    def _browse_compress_input(self):
-        path = filedialog.askopenfilename(
-            title="Selecionar PDF para comprimir",
-            filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")]
+    def _compress_add_files(self):
+        paths = filedialog.askopenfilenames(
+            title="Selecionar PDFs para comprimir",
+            filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
         )
-        if path:
-            self.compress_input_path.set(path)
-            self.compress_output_path.set(
-                os.path.splitext(path)[0] + "_comprimido.pdf")
+        for p in paths:
+            if p not in self.compress_files:
+                self.compress_files.append(p)
+                self.compress_listbox.insert(tk.END, os.path.basename(p))
+        self._update_compress_count()
 
-    def _browse_compress_output(self):
-        path = filedialog.asksaveasfilename(
-            title="Salvar PDF comprimido",
-            defaultextension=".pdf",
-            filetypes=[("Arquivos PDF", "*.pdf")]
-        )
-        if path:
-            self.compress_output_path.set(path)
+    def _compress_remove_selected(self):
+        sel = list(self.compress_listbox.curselection())
+        for idx in reversed(sel):
+            self.compress_listbox.delete(idx)
+            del self.compress_files[idx]
+        self._update_compress_count()
+
+    def _browse_compress_outdir(self):
+        d = filedialog.askdirectory(title="Pasta de saída para PDFs comprimidos")
+        if d:
+            self.compress_outdir.set(d)
+
+    def _update_compress_count(self):
+        n = len(self.compress_files)
+        self._cmp_count_lbl.config(
+            text=f"({n} arquivo{'s' if n != 1 else ''})")
 
     def _clear_compress(self):
-        self.compress_input_path.set("")
-        self.compress_output_path.set("")
+        self.compress_files.clear()
+        self.compress_listbox.delete(0, tk.END)
         self.compress_pb.set(0)
-        self.compress_status.set("Selecione um PDF para comprimir.")
+        self.compress_outdir.set("")
+        self.compress_status.set("Adicione PDFs para comprimir.")
+        self._update_compress_count()
 
     def _start_compress(self):
         if not DEPS_OK:
             self._show_dep_error()
             return
-        if not self.compress_input_path.get():
-            messagebox.showwarning("Aviso", "Selecione um PDF de entrada.")
-            return
-        if not self.compress_output_path.get():
-            messagebox.showwarning("Aviso", "Defina o caminho do PDF de saída.")
+        if not self.compress_files:
+            messagebox.showwarning("Aviso", "Adicione ao menos um PDF.")
             return
         if self._compress_running:
             return
@@ -927,33 +1028,31 @@ class PDFOcrApp(tk.Tk):
         self.btn_compress.config(state="disabled")
         self.compress_pb.set(0)
         threading.Thread(
-            target=self._run_compress,
-            args=(self.compress_input_path.get(),
-                  self.compress_output_path.get()),
-            daemon=True
+            target=self._run_compress_batch,
+            args=(list(self.compress_files), self.compress_outdir.get()),
+            daemon=True,
         ).start()
 
-    def _run_compress(self, input_pdf, output_pdf):
+    def _run_compress_single(self, input_pdf, output_pdf, fi, total_files):
+        """Comprime um único arquivo. Retorna (orig_kb, new_kb) ou levanta exceção."""
         tmp_files = []
         try:
-            self.after(0, lambda: self.compress_status.set(
-                "Convertendo páginas para imagem..."))
             poppler_path = find_poppler()
             pages = convert_from_path(input_pdf, dpi=150,
                                       poppler_path=poppler_path)
-            total = len(pages)
+            total_pages = len(pages)
             page_buffers = []
 
-            for i, pil_img in enumerate(pages, 1):
-                self.after(0, lambda i=i: self.compress_status.set(
-                    f"Comprimindo página {i} / {total}..."))
+            for pi, pil_img in enumerate(pages, 1):
+                base_pct = (fi - 1) / total_files * 100
+                page_pct = pi / total_pages * (100 / total_files)
+                self.after(0, lambda m=f"[{fi}/{total_files}] "
+                           f"{os.path.basename(input_pdf)} "
+                           f"— página {pi}/{total_pages}":
+                           self.compress_status.set(m))
 
                 img_w, img_h = pil_img.size
-
-                # Salva como JPEG em arquivo temporário; ReportLab embutirá
-                # o JPEG diretamente sem re-encodar, garantindo compressão real.
-                tf = tempfile.NamedTemporaryFile(
-                    suffix=".jpg", delete=False)
+                tf = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
                 tmp_files.append(tf.name)
                 pil_img.convert("RGB").save(
                     tf, format="JPEG", quality=65, optimize=True,
@@ -966,44 +1065,71 @@ class PDFOcrApp(tk.Tk):
                 c.save()
                 page_buffers.append(buf.getvalue())
 
-                pct = i / total * 95
+                pct = base_pct + page_pct * 0.95
                 self.after(0, lambda p=pct: self.compress_pb.set(p))
 
-            self.after(0, lambda: self.compress_status.set(
-                "Gerando PDF final..."))
             merger = PyPDF2.PdfWriter()
             for pb in page_buffers:
                 merger.add_page(PyPDF2.PdfReader(io.BytesIO(pb)).pages[0])
             with open(output_pdf, "wb") as f:
                 merger.write(f)
 
-            orig_kb = os.path.getsize(input_pdf) // 1024
-            new_kb  = os.path.getsize(output_pdf) // 1024
-            ratio   = (1 - new_kb / orig_kb) * 100 if orig_kb > 0 else 0
-
-            self.after(0, lambda: self.compress_pb.set(100))
-            self.after(0, lambda: self.compress_status.set(
-                f"Concluído! {orig_kb} KB → {new_kb} KB  "
-                f"(redução de {ratio:.0f}%)"))
-            self.after(0, lambda: messagebox.showinfo(
-                "Compressão concluída",
-                f"PDF comprimido gerado!\n\n{output_pdf}\n\n"
-                f"Tamanho original : {orig_kb} KB\n"
-                f"Tamanho final    : {new_kb} KB\n"
-                f"Redução          : {ratio:.0f}%"
-            ))
-        except Exception as e:
-            self.after(0, lambda: messagebox.showerror(
-                "Erro durante compressão", str(e)))
-            self.after(0, lambda: self.compress_status.set(f"Erro: {e}"))
+            return os.path.getsize(input_pdf) // 1024, \
+                   os.path.getsize(output_pdf) // 1024
         finally:
             for f in tmp_files:
                 try:
                     os.unlink(f)
                 except Exception:
                     pass
-            self._compress_running = False
-            self.after(0, lambda: self.btn_compress.config(state="normal"))
+
+    def _run_compress_batch(self, files, outdir):
+        total = len(files)
+        results, errors = [], []
+
+        for fi, input_pdf in enumerate(files, 1):
+            base = os.path.splitext(os.path.basename(input_pdf))[0]
+            dest_dir = outdir if outdir else os.path.dirname(input_pdf)
+            output_pdf = os.path.join(dest_dir, base + "_comprimido.pdf")
+            try:
+                orig_kb, new_kb = self._run_compress_single(
+                    input_pdf, output_pdf, fi, total)
+                ratio = (1 - new_kb / orig_kb) * 100 if orig_kb > 0 else 0
+                results.append((os.path.basename(input_pdf),
+                                 orig_kb, new_kb, ratio))
+            except Exception as e:
+                errors.append(f"{os.path.basename(input_pdf)}: {e}")
+
+        self.after(0, lambda: self.compress_pb.set(100))
+
+        if errors:
+            err_list = "\n".join(errors)
+            self.after(0, lambda: self.compress_status.set(
+                f"Concluído com {len(errors)} erro(s)."))
+            self.after(0, lambda: messagebox.showwarning(
+                "Compressão concluída com erros",
+                f"{len(results)} arquivo(s) comprimido(s) com sucesso.\n\n"
+                f"Erros:\n{err_list}"
+            ))
+        else:
+            lines = "\n".join(
+                f"  {name}  {ok}→{nk} KB  (-{r:.0f}%)"
+                for name, ok, nk, r in results
+            )
+            total_orig = sum(r[1] for r in results)
+            total_new  = sum(r[2] for r in results)
+            total_ratio = (1 - total_new / total_orig) * 100 if total_orig > 0 else 0
+            self.after(0, lambda: self.compress_status.set(
+                f"Concluído! {total_orig} KB → {total_new} KB  "
+                f"(-{total_ratio:.0f}%)"))
+            self.after(0, lambda: messagebox.showinfo(
+                "Compressão concluída",
+                f"{total} arquivo(s) comprimido(s)!\n\n{lines}\n\n"
+                f"Total: {total_orig} KB → {total_new} KB  (-{total_ratio:.0f}%)"
+            ))
+
+        self._compress_running = False
+        self.after(0, lambda: self.btn_compress.config(state="normal"))
 
     # ── Página Sobre ──────────────────────────────────────────
 
@@ -1157,40 +1283,48 @@ class PDFOcrApp(tk.Tk):
         code = self.lang.get().split(" — ")[0]
         self.lang.set(code)
 
-    def _browse_input(self):
-        path = filedialog.askopenfilename(
-            title="Selecionar PDF",
-            filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")]
+    def _ocr_add_files(self):
+        paths = filedialog.askopenfilenames(
+            title="Selecionar PDFs para OCR",
+            filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
         )
-        if path:
-            self.input_path.set(path)
-            self.output_path.set(os.path.splitext(path)[0] + "_pesquisavel.pdf")
+        for p in paths:
+            if p not in self.ocr_files:
+                self.ocr_files.append(p)
+                self.ocr_listbox.insert(tk.END, os.path.basename(p))
+        self._update_ocr_count()
 
-    def _browse_output(self):
-        path = filedialog.asksaveasfilename(
-            title="Salvar PDF pesquisável",
-            defaultextension=".pdf",
-            filetypes=[("Arquivos PDF", "*.pdf")]
-        )
-        if path:
-            self.output_path.set(path)
+    def _ocr_remove_selected(self):
+        sel = list(self.ocr_listbox.curselection())
+        for idx in reversed(sel):
+            self.ocr_listbox.delete(idx)
+            del self.ocr_files[idx]
+        self._update_ocr_count()
+
+    def _browse_ocr_outdir(self):
+        d = filedialog.askdirectory(title="Pasta de saída para PDFs com OCR")
+        if d:
+            self.ocr_outdir.set(d)
+
+    def _update_ocr_count(self):
+        n = len(self.ocr_files)
+        self._ocr_count_lbl.config(
+            text=f"({n} arquivo{'s' if n != 1 else ''})")
 
     def _clear(self):
-        self.input_path.set("")
-        self.output_path.set("")
-        self.progress_var.set(0)
+        self.ocr_files.clear()
+        self.ocr_listbox.delete(0, tk.END)
         self.pb.set(0)
-        self.status.set("Aguardando arquivo...")
+        self.ocr_outdir.set("")
+        self.status.set("Adicione PDFs para iniciar.")
+        self._update_ocr_count()
 
     def _start(self):
         if not DEPS_OK:
             self._show_dep_error()
             return
-        if not self.input_path.get():
-            messagebox.showwarning("Aviso", "Selecione um PDF de entrada.")
-            return
-        if not self.output_path.get():
-            messagebox.showwarning("Aviso", "Defina o caminho do PDF de saída.")
+        if not self.ocr_files:
+            messagebox.showwarning("Aviso", "Adicione ao menos um PDF.")
             return
         if not check_tesseract():
             messagebox.showerror(
@@ -1210,13 +1344,142 @@ class PDFOcrApp(tk.Tk):
         lang_raw = self.lang.get()
         lang = lang_raw.split(" — ")[0] if " — " in lang_raw else lang_raw
         threading.Thread(
-            target=self._run_ocr,
-            args=(self.input_path.get(), self.output_path.get(), lang,
-                  self.highlight_names_var.get()),
-            daemon=True
+            target=self._run_ocr_batch,
+            args=(list(self.ocr_files), self.ocr_outdir.get(),
+                  lang, self.highlight_names_var.get()),
+            daemon=True,
         ).start()
 
     # ── OCR core ──────────────────────────────────────────────
+
+    def _run_ocr_batch(self, files, outdir, lang, highlight_names):
+        total = len(files)
+        ok_files, errors = [], []
+
+        for fi, input_pdf in enumerate(files, 1):
+            base = os.path.splitext(os.path.basename(input_pdf))[0]
+            dest_dir = outdir if outdir else os.path.dirname(input_pdf)
+            output_pdf = os.path.join(dest_dir, base + "_pesquisavel.pdf")
+            try:
+                self._run_ocr_single(
+                    input_pdf, output_pdf, lang,
+                    highlight_names, fi, total)
+                ok_files.append(output_pdf)
+            except Exception as e:
+                errors.append(f"{os.path.basename(input_pdf)}: {e}")
+
+        self.after(0, lambda: (self.progress_var.set(100), self.pb.set(100)))
+        self.after(0, self._close_spinner)
+
+        if errors:
+            err_list = "\n".join(errors)
+            self._set_status(f"Concluído com {len(errors)} erro(s).")
+            self.after(0, lambda: messagebox.showwarning(
+                "OCR concluído com erros",
+                f"{len(ok_files)} arquivo(s) processado(s) com sucesso.\n\n"
+                f"Erros:\n{err_list}"
+            ))
+        else:
+            extra = " · nomes destacados" if highlight_names else ""
+            self._set_status(
+                f"Concluído! {total} arquivo(s) processado(s).{extra}")
+            names_note = ("\n(nomes de pessoas destacados em amarelo)"
+                          if highlight_names else "")
+            listing = "\n".join(os.path.basename(p) for p in ok_files)
+            self.after(0, lambda: messagebox.showinfo(
+                "OCR concluído",
+                f"{total} PDF(s) pesquisável(is) gerado(s)!\n\n"
+                f"{listing}{names_note}\n\n"
+                "Use CTRL+F no leitor de PDF para pesquisar."
+            ))
+
+        self._running = False
+        self.after(0, lambda: self.btn_run.config(state="normal"))
+
+    def _run_ocr_single(self, input_pdf, output_pdf, lang,
+                        highlight_names, fi, total_files):
+        """Processa um único PDF. Levanta exceção em caso de erro."""
+        self._spinner_status(
+            f"[{fi}/{total_files}] Convertendo para imagem...")
+        poppler_path = find_poppler()
+        pages = convert_from_path(input_pdf, dpi=300,
+                                  poppler_path=poppler_path)
+        total_pages = len(pages)
+        page_buffers = []
+
+        for pi, pil_img in enumerate(pages, 1):
+            self._spinner_status(
+                f"[{fi}/{total_files}] OCR — "
+                f"{os.path.basename(input_pdf)}")
+            self._spinner_page(pi, total_pages)
+            self._set_status(
+                f"[{fi}/{total_files}] {os.path.basename(input_pdf)} "
+                f"— página {pi}/{total_pages}")
+
+            ocr_data = pytesseract.image_to_data(
+                pil_img, lang=lang,
+                output_type=pytesseract.Output.DICT)
+            img_w, img_h = pil_img.size
+
+            buf = io.BytesIO()
+            c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
+            c.drawImage(ImageReader(pil_img), 0, 0,
+                        width=img_w, height=img_h)
+
+            if highlight_names:
+                name_boxes = self._detect_names(ocr_data)
+                if name_boxes:
+                    c.saveState()
+                    c.setFillColorRGB(1.0, 0.85, 0.0, alpha=0.35)
+                    for nx, ny, nw, nh in name_boxes:
+                        pad = 2
+                        c.rect(nx - pad, img_h - ny - nh - pad,
+                               nw + pad * 2, nh + pad * 2,
+                               fill=1, stroke=0)
+                    c.restoreState()
+
+            c.setFillColorRGB(0, 0, 0, alpha=0)
+            for j in range(len(ocr_data["text"])):
+                word = ocr_data["text"][j]
+                try:
+                    conf = int(ocr_data["conf"][j])
+                except (TypeError, ValueError):
+                    conf = -1
+                if not word or not word.strip() or conf <= 0:
+                    continue
+                x, y = ocr_data["left"][j], ocr_data["top"][j]
+                w, h = ocr_data["width"][j], ocr_data["height"][j]
+                if h <= 0 or w <= 0:
+                    continue
+                font_size = max(h * 0.85, 1)
+                try:
+                    c.setFont("Helvetica", font_size)
+                    tw = c.stringWidth(word, "Helvetica", font_size)
+                    sx = w / tw if tw > 0 else 1
+                    c.saveState()
+                    c.transform(sx, 0, 0, 1, x, img_h - y - h)
+                    c.drawString(0, 0, word)
+                    c.restoreState()
+                except Exception:
+                    pass
+
+            c.save()
+            page_buffers.append(buf.getvalue())
+
+            # Progresso global: (arquivo concluído) + (páginas do arquivo atual)
+            base_pct = (fi - 1) / total_files * 95
+            page_pct = pi / total_pages * (95 / total_files)
+            pct = base_pct + page_pct
+            self.after(0, lambda p=pct: (
+                self.progress_var.set(p), self.pb.set(p)))
+
+        self._spinner_status(
+            f"[{fi}/{total_files}] Gerando PDF...")
+        merger = PyPDF2.PdfWriter()
+        for pb in page_buffers:
+            merger.add_page(PyPDF2.PdfReader(io.BytesIO(pb)).pages[0])
+        with open(output_pdf, "wb") as f:
+            merger.write(f)
 
     def _detect_names(self, ocr_data):
         """
@@ -1291,99 +1554,6 @@ class PDFOcrApp(tk.Tk):
             else:
                 i += 1
         return names
-
-    def _run_ocr(self, input_pdf, output_pdf, lang, highlight_names=True):
-        try:
-            self._spinner_status("Convertendo páginas para imagem...")
-            poppler_path = find_poppler()
-            pages = convert_from_path(input_pdf, dpi=300, poppler_path=poppler_path)
-            total = len(pages)
-            page_buffers = []
-
-            for i, pil_img in enumerate(pages, 1):
-                self._spinner_status("Aplicando OCR...")
-                self._spinner_page(i, total)
-                self._set_status(f"OCR página {i} / {total}...")
-
-                ocr_data = pytesseract.image_to_data(
-                    pil_img, lang=lang, output_type=pytesseract.Output.DICT)
-                img_w, img_h = pil_img.size
-
-                buf = io.BytesIO()
-                c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
-                c.drawImage(ImageReader(pil_img), 0, 0, width=img_w, height=img_h)
-
-                # Destaque de nomes de pessoas (retângulo âmbar semi-transparente)
-                if highlight_names:
-                    self._spinner_status("Detectando nomes de pessoas...")
-                    name_boxes = self._detect_names(ocr_data)
-                    if name_boxes:
-                        c.saveState()
-                        c.setFillColorRGB(1.0, 0.85, 0.0, alpha=0.35)
-                        for nx, ny, nw, nh in name_boxes:
-                            pad = 2
-                            c.rect(nx - pad,
-                                   img_h - ny - nh - pad,
-                                   nw + pad * 2,
-                                   nh + pad * 2,
-                                   fill=1, stroke=0)
-                        c.restoreState()
-
-                # Camada de texto invisível (pesquisável)
-                c.setFillColorRGB(0, 0, 0, alpha=0)
-                for j in range(len(ocr_data["text"])):
-                    word = ocr_data["text"][j]
-                    try:
-                        conf = int(ocr_data["conf"][j])
-                    except (TypeError, ValueError):
-                        conf = -1
-                    if not word or not word.strip() or conf <= 0:
-                        continue
-                    x, y = ocr_data["left"][j], ocr_data["top"][j]
-                    w, h = ocr_data["width"][j], ocr_data["height"][j]
-                    if h <= 0 or w <= 0:
-                        continue
-                    font_size = max(h * 0.85, 1)
-                    try:
-                        c.setFont("Helvetica", font_size)
-                        tw = c.stringWidth(word, "Helvetica", font_size)
-                        sx = w / tw if tw > 0 else 1
-                        c.saveState()
-                        c.transform(sx, 0, 0, 1, x, img_h - y - h)
-                        c.drawString(0, 0, word)
-                        c.restoreState()
-                    except Exception:
-                        pass
-
-                c.save()
-                page_buffers.append(buf.getvalue())
-                pct = i / total * 95
-                self.after(0, lambda p=pct: (self.progress_var.set(p), self.pb.set(p)))
-
-            self._spinner_status("Gerando PDF final...")
-            self._set_status("Gerando PDF final...")
-            merger = PyPDF2.PdfWriter()
-            for pb in page_buffers:
-                merger.add_page(PyPDF2.PdfReader(io.BytesIO(pb)).pages[0])
-            with open(output_pdf, "wb") as f:
-                merger.write(f)
-
-            self.after(0, lambda: (self.progress_var.set(100), self.pb.set(100)))
-            self._set_status(f"Concluído! {os.path.basename(output_pdf)}")
-            self.after(0, self._close_spinner)
-            extra = "\n(nomes destacados em amarelo)" if highlight_names else ""
-            self.after(0, lambda: messagebox.showinfo(
-                "Sucesso",
-                f"PDF pesquisável gerado!\n\n{output_pdf}{extra}\n\n"
-                "Use CTRL+F no seu leitor de PDF para pesquisar."
-            ))
-        except Exception as e:
-            self.after(0, self._close_spinner)
-            self.after(0, lambda: messagebox.showerror("Erro durante OCR", str(e)))
-            self._set_status(f"Erro: {e}")
-        finally:
-            self._running = False
-            self.after(0, lambda: self.btn_run.config(state="normal"))
 
     def _spinner_status(self, msg):
         sp = self._spinner
