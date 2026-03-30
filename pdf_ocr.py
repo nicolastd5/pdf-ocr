@@ -1,5 +1,5 @@
 """
-PDF OCR v0.8.1
+PDF OCR v0.9
 Converte PDFs escaneados em PDFs pesquisáveis com OCR.
 Repositório: https://github.com/nicolastd5/pdf-ocr
 """
@@ -30,7 +30,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.8.1"
+APP_VERSION = "0.9"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -1263,5 +1263,30 @@ class PDFOcrApp(tk.Tk):
 
 
 if __name__ == "__main__":
+    # Verificação de licença antes de abrir o app principal
+    _root = tk.Tk()
+    _root.withdraw()  # Esconde janela vazia
+
+    license_ok = False
+    saved = _load_license()
+    if saved:
+        ok, _ = validate_license_online(saved["key"], saved["hw_id"])
+        if ok:
+            license_ok = True
+        else:
+            # Licença salva inválida/revogada — pede reativação
+            dlg = LicenseDialog(_root)
+            _root.wait_window(dlg)
+            license_ok = dlg.result
+    else:
+        dlg = LicenseDialog(_root)
+        _root.wait_window(dlg)
+        license_ok = dlg.result
+
+    _root.destroy()
+
+    if not license_ok:
+        sys.exit(0)
+
     app = PDFOcrApp()
     app.mainloop()

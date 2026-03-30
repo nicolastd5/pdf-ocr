@@ -6,3 +6,4 @@ dist/
 *.egg-info/
 pdf_ocr_prefs.json
 *.log
+pdf_ocr_license.json
