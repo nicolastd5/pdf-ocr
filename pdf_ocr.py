@@ -1,5 +1,5 @@
 """
-PDF OCR v0.8
+PDF OCR v0.8.1
 Converte PDFs escaneados em PDFs pesquisáveis com OCR.
 Repositório: https://github.com/nicolastd5/pdf-ocr
 """
@@ -30,7 +30,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.8"
+APP_VERSION = "0.8.1"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -73,7 +73,11 @@ def check_tesseract():
     bundled = _bundled_bin("tesseract.exe")
     if bundled:
         pytesseract.pytesseract.tesseract_cmd = bundled
-        os.environ["TESSDATA_PREFIX"] = os.path.dirname(bundled)
+        tessdata = os.path.join(os.path.dirname(bundled), "tessdata")
+        if os.path.isdir(tessdata):
+            os.environ["TESSDATA_PREFIX"] = tessdata
+        else:
+            os.environ["TESSDATA_PREFIX"] = os.path.dirname(bundled)
         return True
     common_paths = [
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
