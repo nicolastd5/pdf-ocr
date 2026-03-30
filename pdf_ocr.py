@@ -605,18 +605,6 @@ del "%~f0"
         messagebox.showerror("Falha no download", msg, parent=self)
 
 
-def _flat_btn(parent, text, command, font=None, **kw):
-    font = font or ("Segoe UI", 10)
-    btn = tk.Button(
-        parent, text=text, command=command,
-        bg=C["input"], fg=C["fg"],
-        activebackground=C["hover"], activeforeground=C["fg_bright"],
-        relief="flat", bd=0, cursor="hand2",
-        font=font, **kw
-    )
-    return btn
-
-
 class LicenseDialog(tk.Toplevel):
     """Tela de ativação de licença mostrada quando não há licença válida."""
 
