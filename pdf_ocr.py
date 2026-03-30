@@ -1,6 +1,6 @@
 """
-PDF OCR v0.9
-Converte PDFs escaneados em PDFs pesquisáveis com OCR.
+PDF Tools
+Ferramenta completa para PDF: OCR, compressão, divisão e união.
 Repositório: https://github.com/nicolastd5/pdf-ocr
 """
 
@@ -31,7 +31,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.9.6"
+APP_VERSION = "0.9.7"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -149,7 +149,7 @@ def _urlopen_ssl(req, timeout=15):
 def fetch_latest_release():
     req = urllib.request.Request(
         GITHUB_RELEASES_API,
-        headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"}
+        headers={"User-Agent": f"pdf-tools/{APP_VERSION}"}
     )
     with _urlopen_ssl(req, timeout=15) as resp:
         data = json.loads(resp.read().decode())
@@ -488,7 +488,7 @@ class UpdateDialog(tk.Toplevel):
         try:
             tmp_dir = tempfile.mkdtemp(prefix="pdfocr_update_")
             tmp_exe = os.path.join(tmp_dir, "PDF_OCR_new.exe")
-            req = urllib.request.Request(url, headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"})
+            req = urllib.request.Request(url, headers={"User-Agent": f"pdf-tools/{APP_VERSION}"})
             with _urlopen_ssl(req, timeout=300) as resp:
                 total      = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -534,13 +534,13 @@ ping 127.0.0.1 -n 3 > nul
 if exist "{old_exe}" del /F /Q "{old_exe}"
 rename "{current_exe}" "{os.path.basename(old_exe)}"
 if errorlevel 1 (
-    msg * "PDF OCR: falha ao renomear executável. Copie manualmente: {new_exe}"
+    msg * "PDF Tools: falha ao renomear executável. Copie manualmente: {new_exe}"
     goto :eof
 )
 move /Y "{new_exe}" "{current_exe}"
 if errorlevel 1 (
     rename "{old_exe}" "{os.path.basename(current_exe)}"
-    msg * "PDF OCR: falha ao instalar atualização. Copie manualmente: {new_exe}"
+    msg * "PDF Tools: falha ao instalar atualização. Copie manualmente: {new_exe}"
     goto :eof
 )
 del /F /Q "{old_exe}" 2>nul
@@ -601,7 +601,7 @@ class PDFOcrApp(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title(f"PDF OCR  v{APP_VERSION}")
+        self.title(f"PDF Tools  v{APP_VERSION}")
         self.geometry("760x640")
         self.minsize(760, 580)
         self.resizable(True, True)
@@ -766,7 +766,7 @@ class PDFOcrApp(tk.Tk):
             "compress": ("Comprimir",  "Reduza o tamanho de PDFs existentes"),
             "split":    ("Dividir PDF","Separe um PDF em partes individuais"),
             "merge":    ("Juntar PDF", "Una múltiplos PDFs em um único arquivo"),
-            "about":    ("Sobre",      f"PDF OCR  v{APP_VERSION}"),
+            "about":    ("Sobre",      f"PDF Tools  v{APP_VERSION}"),
         }
         t, s = titles[key]
         self._page_title.config(text=t)
@@ -1271,7 +1271,7 @@ class PDFOcrApp(tk.Tk):
         inner = tk.Frame(card, bg=C["panel"], padx=20, pady=18)
         inner.pack(fill="x")
 
-        tk.Label(inner, text=f"PDF OCR",
+        tk.Label(inner, text="PDF Tools",
                  font=("Segoe UI", 18, "bold"),
                  bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
 
@@ -1286,24 +1286,55 @@ class PDFOcrApp(tk.Tk):
                  bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
 
         tk.Label(inner,
-                 text="Converte PDFs escaneados em PDFs pesquisáveis usando OCR.\n"
+                 text="Ferramenta completa para manipulação de PDFs.\n"
                       "Desenvolvido com Python, Tesseract e Tkinter.",
                  font=("Segoe UI", 9), bg=C["panel"], fg=C["fg"],
                  justify="left").pack(anchor="w", pady=(10, 8))
 
-        link = tk.Label(inner,
+        # Grade de funcionalidades
+        feats_f = tk.Frame(inner, bg=C["panel"])
+        feats_f.pack(anchor="w", pady=(0, 10))
+        _features = [
+            ("⬡", "OCR",          "Converte PDFs escaneados em pesquisáveis,\n"
+                                   "com destaque automático de nomes de pessoas."),
+            ("⊜", "Comprimir",    "Reduz o tamanho de PDFs com opções de\n"
+                                   "qualidade (100–250 DPI) e formato (JPEG/PNG)."),
+            ("⊟", "Dividir PDF",  "Separa um PDF em partes individuais.\n"
+                                   "Em breve."),
+            ("⊞", "Juntar PDF",   "Une múltiplos PDFs em um único arquivo.\n"
+                                   "Em breve."),
+        ]
+        for icon, title, desc in _features:
+            row_f = tk.Frame(feats_f, bg=C["panel"])
+            row_f.pack(anchor="w", pady=(0, 8))
+            tk.Label(row_f, text=icon,
+                     font=("Segoe UI", 14), bg=C["panel"],
+                     fg=C["accent"], width=3).pack(side="left", anchor="n")
+            txt_f = tk.Frame(row_f, bg=C["panel"])
+            txt_f.pack(side="left", anchor="w")
+            tk.Label(txt_f, text=title,
+                     font=("Segoe UI", 9, "bold"),
+                     bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
+            tk.Label(txt_f, text=desc,
+                     font=("Segoe UI", 8),
+                     bg=C["panel"], fg=C["fg_dim"],
+                     justify="left").pack(anchor="w")
+
+        tk.Frame(inner, bg=C["border"], height=1).pack(fill="x", pady=(4, 0))
+
+        link_f = tk.Frame(inner, bg=C["panel"])
+        link_f.pack(anchor="w", pady=(10, 0), fill="x")
+        link = tk.Label(link_f,
                         text=f"github.com/{GITHUB_USER}/{GITHUB_REPO}",
                         font=("Segoe UI", 9, "underline"),
                         bg=C["panel"], fg=C["accent"], cursor="hand2")
-        link.pack(anchor="w")
+        link.pack(side="left")
         link.bind("<Button-1>", lambda _: webbrowser.open(
             f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}"))
 
-        tk.Frame(inner, bg=C["border"], height=1).pack(fill="x", pady=(14, 0))
-
-        tk.Label(inner,
-                 text="Autor: Nicolas Almeida Hader Dias",
-                 font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack(anchor="w", pady=(10, 0))
+        tk.Label(link_f, text=" · Autor: Nicolas Almeida Hader Dias",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
 
         # card atualização
         upd_card = tk.Frame(page, bg=C["panel"],
