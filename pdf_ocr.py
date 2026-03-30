@@ -1,5 +1,5 @@
 """
-PDF OCR v0.5
+PDF OCR v0.7
 Converte PDFs escaneados em PDFs pesquisáveis com OCR.
 Repositório: https://github.com/nicolastd5/pdf-ocr
 """
@@ -30,15 +30,36 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.6"
+APP_VERSION = "0.7"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases"
 
+# ─────────────────────────────────────────────────────────────
+#  Paleta VS Code Dark
+# ─────────────────────────────────────────────────────────────
+C = {
+    "bg":        "#1e1e1e",
+    "panel":     "#252526",
+    "sidebar":   "#333333",
+    "input":     "#3c3c3c",
+    "hover":     "#2a2d2e",
+    "border":    "#454545",
+    "accent":    "#4fc3f7",
+    "accent_dk": "#0288d1",
+    "fg":        "#d4d4d4",
+    "fg_dim":    "#858585",
+    "fg_bright": "#ffffff",
+    "success":   "#4ec9b0",
+    "warn":      "#dcdcaa",
+    "error":     "#f44747",
+    "sel":       "#094771",
+}
+
 
 # ─────────────────────────────────────────────────────────────
-#  Tesseract / Poppler helpers
+#  Helpers de dependências
 # ─────────────────────────────────────────────────────────────
 
 def _bundled_bin(name):
@@ -78,7 +99,7 @@ def find_poppler():
         if os.path.isdir(bundled_dir):
             return bundled_dir
     if shutil.which("pdftoppm"):
-        return None  # está no PATH, pdf2image encontra sozinho
+        return None
     for p in [
         r"C:\Program Files\poppler\Library\bin",
         r"C:\Program Files\poppler-24\Library\bin",
@@ -102,7 +123,6 @@ def version_tuple(v):
 
 
 def fetch_latest_release():
-    """Retorna dict com tag, body (changelog) e download_url do .exe."""
     req = urllib.request.Request(
         GITHUB_RELEASES_API,
         headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"}
@@ -110,11 +130,10 @@ def fetch_latest_release():
     with urllib.request.urlopen(req, timeout=15) as resp:
         data = json.loads(resp.read().decode())
 
-    tag = data.get("tag_name", "").lstrip("v")
+    tag  = data.get("tag_name", "").lstrip("v")
     body = data.get("body", "Sem notas de versão.").strip()
     html_url = data.get("html_url", GITHUB_RELEASES_PAGE)
 
-    # Procura o asset .exe
     exe_url = None
     for asset in data.get("assets", []):
         if asset["name"].lower().endswith(".exe"):
@@ -125,26 +144,106 @@ def fetch_latest_release():
 
 
 # ─────────────────────────────────────────────────────────────
+#  Widget helpers
+# ─────────────────────────────────────────────────────────────
+
+def _style_entry(e):
+    """Aplica estilo dark num tk.Entry."""
+    e.configure(
+        bg=C["input"], fg=C["fg"],
+        insertbackground=C["fg"],
+        relief="flat",
+        highlightthickness=1,
+        highlightbackground=C["border"],
+        highlightcolor=C["accent"],
+        disabledbackground=C["input"],
+        disabledforeground=C["fg_dim"],
+    )
+
+
+def _flat_btn(parent, text, command, fg=None, bg=None, font=None, **kw):
+    fg   = fg   or C["fg"]
+    bg   = bg   or C["hover"]
+    font = font or ("Segoe UI", 9)
+    btn = tk.Button(
+        parent, text=text, command=command,
+        bg=bg, fg=fg, activebackground=C["sel"],
+        activeforeground=C["fg_bright"],
+        relief="flat", bd=0, cursor="hand2",
+        font=font, **kw
+    )
+    btn.bind("<Enter>", lambda _: btn.config(bg=C["sel"] if bg == C["hover"] else C["accent_dk"]))
+    btn.bind("<Leave>", lambda _: btn.config(bg=bg))
+    return btn
+
+
+def _accent_btn(parent, text, command, font=None, **kw):
+    font = font or ("Segoe UI", 10, "bold")
+    btn = tk.Button(
+        parent, text=text, command=command,
+        bg=C["accent"], fg=C["bg"],
+        activebackground=C["accent_dk"], activeforeground=C["fg_bright"],
+        relief="flat", bd=0, cursor="hand2",
+        font=font, **kw
+    )
+    btn.bind("<Enter>", lambda _: btn.config(bg=C["accent_dk"]))
+    btn.bind("<Leave>", lambda _: btn.config(bg=C["accent"]))
+    return btn
+
+
+class CanvasProgressBar(tk.Canvas):
+    """Barra de progresso customizada desenhada em Canvas."""
+    _H = 6
+
+    def __init__(self, parent, **kw):
+        kw.setdefault("height", self._H)
+        kw.setdefault("bg", C["panel"])
+        kw.setdefault("highlightthickness", 0)
+        super().__init__(parent, **kw)
+        self._value = 0
+        self.bind("<Configure>", self._redraw)
+
+    def set(self, value):
+        self._value = max(0.0, min(100.0, value))
+        self._redraw()
+
+    def _redraw(self, *_):
+        w = self.winfo_width()
+        h = self._H
+        self.delete("all")
+        # track
+        self.create_rounded_rect(0, 0, w, h, 3, fill=C["input"], outline="")
+        # fill
+        fill_w = int(w * self._value / 100)
+        if fill_w > 3:
+            self.create_rounded_rect(0, 0, fill_w, h, 3, fill=C["accent"], outline="")
+
+    def create_rounded_rect(self, x1, y1, x2, y2, r, **kw):
+        r = min(r, (x2 - x1) // 2, (y2 - y1) // 2)
+        self.create_arc(x1,     y1,     x1+2*r, y1+2*r, start=90,  extent=90,  style="pieslice", **kw)
+        self.create_arc(x2-2*r, y1,     x2,     y1+2*r, start=0,   extent=90,  style="pieslice", **kw)
+        self.create_arc(x1,     y2-2*r, x1+2*r, y2,     start=180, extent=90,  style="pieslice", **kw)
+        self.create_arc(x2-2*r, y2-2*r, x2,     y2,     start=270, extent=90,  style="pieslice", **kw)
+        self.create_rectangle(x1+r, y1, x2-r, y2, **kw)
+        self.create_rectangle(x1, y1+r, x2, y2-r, **kw)
+
+
+# ─────────────────────────────────────────────────────────────
 #  Spinner
 # ─────────────────────────────────────────────────────────────
 
 class SpinnerWindow(tk.Toplevel):
-    _ARC_SPAN = 280
-    _SPEED    = 6
-    _INTERVAL = 16
-    _RADIUS   = 48
-    _THICKNESS = 9
-    _BG       = "#1a1a2e"
-    _FG_ARC   = "#4fc3f7"
-    _FG_TRACK = "#2e2e4e"
-    _FG_TEXT  = "#ffffff"
-    _FG_SUB   = "#aaaacc"
+    _ARC_SPAN  = 280
+    _SPEED     = 6
+    _INTERVAL  = 16
+    _RADIUS    = 44
+    _THICKNESS = 8
 
     def __init__(self, parent):
         super().__init__(parent)
         self.title("")
         self.resizable(False, False)
-        self.configure(bg=self._BG)
+        self.configure(bg=C["panel"])
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self._angle    = 0
@@ -157,29 +256,35 @@ class SpinnerWindow(tk.Toplevel):
         self.grab_set()
 
     def _build(self):
-        outer = tk.Frame(self, bg=self._BG, padx=32, pady=32)
+        # borda sutil
+        outer = tk.Frame(self, bg=C["border"], padx=1, pady=1)
         outer.pack()
-        tk.Label(outer, text="Processando OCR",
-                 font=("Segoe UI", 13, "bold"),
-                 bg=self._BG, fg=self._FG_TEXT).pack(pady=(0, 18))
+        inner = tk.Frame(outer, bg=C["panel"], padx=36, pady=32)
+        inner.pack()
+
+        tk.Label(inner, text="Processando OCR",
+                 font=("Segoe UI", 12, "bold"),
+                 bg=C["panel"], fg=C["fg_bright"]).pack(pady=(0, 16))
+
         size = self._RADIUS * 2 + self._THICKNESS * 2 + 4
-        self._canvas = tk.Canvas(outer, width=size, height=size,
-                                 bg=self._BG, highlightthickness=0)
+        self._canvas = tk.Canvas(inner, width=size, height=size,
+                                 bg=C["panel"], highlightthickness=0)
         self._canvas.pack()
         cx = cy = size // 2
         r, t = self._RADIUS, self._THICKNESS
         self._canvas.create_oval(cx-r, cy-r, cx+r, cy+r,
-                                 outline=self._FG_TRACK, width=t)
+                                 outline=C["input"], width=t)
         self._arc = self._canvas.create_arc(
             cx-r, cy-r, cx+r, cy+r,
             start=90, extent=-self._ARC_SPAN,
-            outline=self._FG_ARC, width=t, style="arc"
+            outline=C["accent"], width=t, style="arc"
         )
-        tk.Label(outer, textvariable=self.status_var,
-                 font=("Segoe UI", 10), bg=self._BG, fg=self._FG_TEXT,
-                 wraplength=260, justify="center").pack(pady=(16, 2))
-        tk.Label(outer, textvariable=self.page_var,
-                 font=("Segoe UI", 9), bg=self._BG, fg=self._FG_SUB).pack()
+
+        tk.Label(inner, textvariable=self.status_var,
+                 font=("Segoe UI", 10), bg=C["panel"], fg=C["fg"],
+                 wraplength=260, justify="center").pack(pady=(14, 2))
+        tk.Label(inner, textvariable=self.page_var,
+                 font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack()
 
     def _center(self, parent):
         self.update_idletasks()
@@ -222,27 +327,18 @@ class SpinnerWindow(tk.Toplevel):
 
 
 # ─────────────────────────────────────────────────────────────
-#  Update Dialog  (changelog + download automático)
+#  Update Dialog
 # ─────────────────────────────────────────────────────────────
 
 class UpdateDialog(tk.Toplevel):
-    """Janela que mostra changelog e baixa + aplica o update automaticamente."""
-
-    _BG      = "#1a1a2e"
-    _BG2     = "#14142a"
-    _FG      = "#ffffff"
-    _FG_SUB  = "#aaaacc"
-    _ACCENT  = "#4fc3f7"
-    _BTN_BG  = "#4fc3f7"
-    _BTN_FG  = "#1a1a2e"
 
     def __init__(self, parent, release_info):
         super().__init__(parent)
-        self._info    = release_info
-        self._parent  = parent
+        self._info   = release_info
+        self._parent = parent
         self.title("Atualização disponível")
         self.resizable(False, False)
-        self.configure(bg=self._BG)
+        self.configure(bg=C["panel"])
         self.attributes("-topmost", True)
         self._build()
         self._center(parent)
@@ -252,70 +348,78 @@ class UpdateDialog(tk.Toplevel):
         tag  = self._info["tag"]
         body = self._info["body"]
 
-        # Cabeçalho
-        hdr = tk.Frame(self, bg=self._BG, padx=28, pady=20)
+        # borda
+        wrap = tk.Frame(self, bg=C["border"], padx=1, pady=1)
+        wrap.pack(fill="both", expand=True)
+        root = tk.Frame(wrap, bg=C["panel"])
+        root.pack(fill="both", expand=True)
+
+        # cabeçalho
+        hdr = tk.Frame(root, bg=C["bg"], padx=24, pady=18)
         hdr.pack(fill="x")
-        tk.Label(hdr, text="Nova versão disponível!",
-                 font=("Segoe UI", 14, "bold"),
-                 bg=self._BG, fg=self._FG).pack(anchor="w")
+        tk.Label(hdr, text="Nova versão disponível",
+                 font=("Segoe UI", 13, "bold"),
+                 bg=C["bg"], fg=C["fg_bright"]).pack(anchor="w")
         tk.Label(hdr, text=f"v{APP_VERSION}  →  v{tag}",
-                 font=("Segoe UI", 10), bg=self._BG, fg=self._ACCENT).pack(anchor="w", pady=(2, 0))
+                 font=("Segoe UI", 10), bg=C["bg"], fg=C["accent"]).pack(anchor="w", pady=(3, 0))
 
-        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=0)
+        # separador
+        tk.Frame(root, bg=C["border"], height=1).pack(fill="x")
 
-        # Changelog
-        body_frame = tk.Frame(self, bg=self._BG2, padx=20, pady=14)
-        body_frame.pack(fill="both", expand=True, padx=0)
+        # changelog
+        body_frame = tk.Frame(root, bg=C["panel"], padx=20, pady=14)
+        body_frame.pack(fill="both", expand=True)
         tk.Label(body_frame, text="O que há de novo:",
                  font=("Segoe UI", 9, "bold"),
-                 bg=self._BG2, fg=self._FG_SUB).pack(anchor="w", pady=(0, 6))
+                 bg=C["panel"], fg=C["fg_dim"]).pack(anchor="w", pady=(0, 6))
 
         txt = tk.Text(body_frame, height=10, width=52,
-                      bg=self._BG2, fg=self._FG,
-                      relief="flat", font=("Segoe UI", 9),
+                      bg=C["input"], fg=C["fg"],
+                      relief="flat", font=("Consolas", 9),
                       wrap="word", state="normal",
-                      highlightthickness=0, bd=0)
+                      highlightthickness=1,
+                      highlightbackground=C["border"],
+                      bd=0, padx=8, pady=6)
         txt.insert("1.0", body)
         txt.config(state="disabled")
-        sb = ttk.Scrollbar(body_frame, orient="vertical", command=txt.yview)
+
+        style = ttk.Style()
+        style.configure("Dark.Vertical.TScrollbar",
+                        background=C["input"], troughcolor=C["panel"],
+                        bordercolor=C["panel"], arrowcolor=C["fg_dim"])
+        sb = ttk.Scrollbar(body_frame, orient="vertical",
+                           command=txt.yview, style="Dark.Vertical.TScrollbar")
         txt.configure(yscrollcommand=sb.set)
         txt.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
 
-        ttk.Separator(self, orient="horizontal").pack(fill="x")
+        tk.Frame(root, bg=C["border"], height=1).pack(fill="x")
 
-        # Progresso (oculto até o download iniciar)
-        self._prog_frame = tk.Frame(self, bg=self._BG, padx=28, pady=8)
+        # progresso
+        self._prog_frame = tk.Frame(root, bg=C["panel"], padx=24, pady=8)
         self._prog_frame.pack(fill="x")
         self._prog_label = tk.Label(self._prog_frame, text="",
                                     font=("Segoe UI", 8),
-                                    bg=self._BG, fg=self._FG_SUB)
+                                    bg=C["panel"], fg=C["fg_dim"])
         self._prog_label.pack(anchor="w")
-        self._prog_bar = ttk.Progressbar(self._prog_frame, length=400,
-                                         mode="determinate", maximum=100)
-        self._prog_bar.pack(fill="x", pady=(2, 0))
-        self._prog_frame.pack_forget()   # escondido por padrão
+        self._prog_bar = CanvasProgressBar(self._prog_frame, width=420)
+        self._prog_bar.pack(fill="x", pady=(4, 0))
+        self._prog_frame.pack_forget()
 
-        # Botões
-        self._btn_row = tk.Frame(self, bg=self._BG, padx=28, pady=16)
-        btn_row = self._btn_row
-        btn_row.pack(fill="x")
-        self._btn_update = tk.Button(
-            btn_row,
-            text="Sim, atualizar agora",
-            font=("Segoe UI", 10, "bold"),
-            bg=self._BTN_BG, fg=self._BTN_FG,
-            activebackground="#81d4fa", activeforeground=self._BTN_FG,
-            relief="flat", padx=16, pady=8,
-            command=self._start_download
+        # botões
+        self._btn_row = tk.Frame(root, bg=C["panel"], padx=24, pady=16)
+        self._btn_row.pack(fill="x")
+        self._btn_update = _accent_btn(
+            self._btn_row,
+            text="  Atualizar agora  ",
+            command=self._start_download,
+            padx=16, pady=8
         )
         self._btn_update.pack(side="left", padx=(0, 10))
-        tk.Button(
-            btn_row, text="Agora não",
-            font=("Segoe UI", 10), bg=self._BG, fg=self._FG_SUB,
-            activebackground="#2e2e4e", activeforeground=self._FG,
-            relief="flat", padx=12, pady=8,
-            command=self._dismiss
+        _flat_btn(
+            self._btn_row, text="Agora não",
+            command=self._dismiss,
+            padx=12, pady=8
         ).pack(side="left")
 
         self._center(self._parent)
@@ -333,8 +437,6 @@ class UpdateDialog(tk.Toplevel):
             pass
         self.destroy()
 
-    # ── Download + aplicação ──────────────────────────────────
-
     def _start_download(self):
         exe_url = self._info.get("exe_url")
         if not exe_url:
@@ -345,23 +447,20 @@ class UpdateDialog(tk.Toplevel):
                 parent=self
             )
             return
-
-        self._btn_update.config(state="disabled", text="Baixando...")
-        self._prog_frame.pack(fill="x", before=self._btn_row, padx=28, pady=(0, 4))
+        self._btn_update.config(state="disabled", text="  Baixando...  ")
+        self._prog_frame.pack(fill="x", before=self._btn_row, padx=0, pady=(0, 4))
         threading.Thread(target=self._download_and_apply,
                          args=(exe_url,), daemon=True).start()
 
     def _download_and_apply(self, url):
         try:
-            # Baixa para temp
-            tmp_dir  = tempfile.mkdtemp(prefix="pdfocr_update_")
-            tmp_exe  = os.path.join(tmp_dir, "PDF_OCR_new.exe")
-
+            tmp_dir = tempfile.mkdtemp(prefix="pdfocr_update_")
+            tmp_exe = os.path.join(tmp_dir, "PDF_OCR_new.exe")
             req = urllib.request.Request(url, headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"})
             with urllib.request.urlopen(req, timeout=300) as resp:
-                total = int(resp.headers.get("Content-Length", 0))
+                total      = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
-                chunk = 65536
+                chunk      = 65536
                 with open(tmp_exe, "wb") as f:
                     while True:
                         data = resp.read(chunk)
@@ -370,31 +469,27 @@ class UpdateDialog(tk.Toplevel):
                         f.write(data)
                         downloaded += len(data)
                         if total > 0:
-                            pct = downloaded / total * 100
+                            pct      = downloaded / total * 100
                             mb_done  = downloaded / 1_048_576
                             mb_total = total      / 1_048_576
                             self.after(0, lambda p=pct, d=mb_done, t=mb_total:
                                        self._update_progress(p, d, t))
-
             self.after(0, lambda: self._apply_update(tmp_exe))
-
         except Exception as e:
             self.after(0, lambda: self._download_failed(str(e)))
 
     def _update_progress(self, pct, mb_done, mb_total):
-        self._prog_bar["value"] = pct
+        self._prog_bar.set(pct)
         self._prog_label.config(
-            text=f"Baixando... {mb_done:.1f} MB / {mb_total:.1f} MB  ({pct:.0f}%)"
+            text=f"Baixando...  {mb_done:.1f} MB / {mb_total:.1f} MB  ({pct:.0f}%)"
         )
 
     def _apply_update(self, new_exe):
-        """Substitui o executável atual e reinicia."""
         current_exe = sys.executable if getattr(sys, "frozen", False) else None
-
         if current_exe and os.path.isfile(current_exe):
-            pid = os.getpid()
+            pid     = os.getpid()
             bat_path = os.path.join(tempfile.gettempdir(), "pdfocr_update.bat")
-            old_exe = current_exe + ".old"
+            old_exe  = current_exe + ".old"
             with open(bat_path, "w") as f:
                 f.write(f"""@echo off
 :wait
@@ -423,12 +518,10 @@ del "%~f0"
             self._prog_label.config(text="Instalando atualização...")
             self.after(400, lambda: self._launch_bat_and_quit(bat_path))
         else:
-            # Modo dev: apenas abre a pasta com o novo exe
             self._prog_label.config(text="Download concluído!")
             self.after(0, lambda: messagebox.showinfo(
                 "Download concluído",
-                f"Novo executável salvo em:\n{new_exe}\n\n"
-                "Substitua manualmente o arquivo atual.",
+                f"Novo executável salvo em:\n{new_exe}\n\nSubstitua manualmente o arquivo atual.",
                 parent=self
             ))
 
@@ -439,7 +532,7 @@ del "%~f0"
         self._parent.quit()
 
     def _download_failed(self, msg):
-        self._btn_update.config(state="normal", text="Sim, atualizar agora")
+        self._btn_update.config(state="normal", text="  Atualizar agora  ")
         self._prog_label.config(text=f"Erro: {msg}")
         messagebox.showerror("Falha no download", msg, parent=self)
 
@@ -449,74 +542,204 @@ del "%~f0"
 # ─────────────────────────────────────────────────────────────
 
 class PDFOcrApp(tk.Tk):
+
+    # ícones unicode para a sidebar
+    _NAV = [
+        ("ocr",   "⬡", "OCR"),
+        ("about", "ℹ", "Sobre"),
+    ]
+
     def __init__(self):
         super().__init__()
-        self.title(f"PDF OCR v{APP_VERSION}")
-        self.geometry("640x460")
-        self.resizable(False, False)
-        self.configure(bg="#f5f5f5")
+        self.title(f"PDF OCR  v{APP_VERSION}")
+        self.geometry("740x520")
+        self.minsize(740, 520)
+        self.resizable(True, False)
+        self.configure(bg=C["bg"])
 
-        self.input_path   = tk.StringVar()
-        self.output_path  = tk.StringVar()
-        self.lang         = tk.StringVar(value="por")
-        self.status       = tk.StringVar(value="Aguardando arquivo...")
-        self.progress_var = tk.DoubleVar(value=0)
-        self._running     = False
-        self._spinner     = None
+        self.input_path      = tk.StringVar()
+        self.output_path     = tk.StringVar()
+        self.lang            = tk.StringVar(value="por")
+        self.status          = tk.StringVar(value="Aguardando arquivo...")
+        self.progress_var    = tk.DoubleVar(value=0)
+        self.auto_update_var = tk.BooleanVar(value=True)
+        self.update_status   = tk.StringVar(value="")
+        self._running        = False
+        self._spinner        = None
+        self._active_page    = None
+        self._page_frames    = {}
 
+        self._apply_ttk_style()
         self._build_ui()
         self._load_prefs()
+        self._show_page("ocr")
 
         if not DEPS_OK:
             self._show_dep_error()
 
-    # ── UI ────────────────────────────────────────────────────
+    # ── TTK global style ──────────────────────────────────────
+
+    def _apply_ttk_style(self):
+        s = ttk.Style(self)
+        s.theme_use("clam")
+        s.configure(".",
+                     background=C["bg"],
+                     foreground=C["fg"],
+                     fieldbackground=C["input"],
+                     troughcolor=C["input"],
+                     selectbackground=C["sel"],
+                     selectforeground=C["fg_bright"],
+                     bordercolor=C["border"],
+                     lightcolor=C["border"],
+                     darkcolor=C["border"])
+        s.configure("TCombobox",
+                     background=C["input"],
+                     foreground=C["fg"],
+                     fieldbackground=C["input"],
+                     arrowcolor=C["fg_dim"],
+                     bordercolor=C["border"],
+                     relief="flat")
+        s.map("TCombobox",
+              fieldbackground=[("readonly", C["input"])],
+              foreground=[("readonly", C["fg"])],
+              selectbackground=[("readonly", C["sel"])],
+              selectforeground=[("readonly", C["fg_bright"])])
+        s.configure("Dark.Vertical.TScrollbar",
+                     background=C["input"],
+                     troughcolor=C["panel"],
+                     bordercolor=C["panel"],
+                     arrowcolor=C["fg_dim"])
+        s.configure("TCheckbutton",
+                     background=C["panel"],
+                     foreground=C["fg"],
+                     focuscolor=C["panel"])
+        s.map("TCheckbutton",
+              background=[("active", C["panel"])],
+              foreground=[("active", C["fg_bright"])])
+
+    # ── Layout principal ──────────────────────────────────────
 
     def _build_ui(self):
-        nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=10, pady=10)
-        self.tab_ocr   = tk.Frame(nb, bg="#f5f5f5")
-        self.tab_about = tk.Frame(nb, bg="#f5f5f5")
-        nb.add(self.tab_ocr,   text="  OCR  ")
-        nb.add(self.tab_about, text="  Sobre  ")
-        self._build_ocr_tab()
-        self._build_about_tab()
+        # sidebar
+        self._sidebar = tk.Frame(self, bg=C["sidebar"], width=56)
+        self._sidebar.pack(side="left", fill="y")
+        self._sidebar.pack_propagate(False)
 
-    # ── Aba OCR ───────────────────────────────────────────────
+        # cabeçalho da sidebar
+        tk.Label(self._sidebar, text="⬡",
+                 font=("Segoe UI", 18), bg=C["sidebar"],
+                 fg=C["accent"]).pack(pady=(18, 2))
+        tk.Frame(self._sidebar, bg=C["border"], height=1).pack(fill="x", padx=8, pady=6)
 
-    def _build_ocr_tab(self):
-        pad = {"padx": 16, "pady": 6}
-        f = self.tab_ocr
+        # botões de navegação
+        self._nav_btns = {}
+        for key, icon, label in self._NAV:
+            f = tk.Frame(self._sidebar, bg=C["sidebar"])
+            f.pack(fill="x")
+            btn = tk.Button(
+                f, text=icon,
+                font=("Segoe UI", 16),
+                bg=C["sidebar"], fg=C["fg_dim"],
+                activebackground=C["hover"],
+                activeforeground=C["accent"],
+                relief="flat", bd=0, cursor="hand2",
+                width=3, pady=10,
+                command=lambda k=key: self._show_page(k)
+            )
+            btn.pack(fill="x")
+            btn.bind("<Enter>", lambda e, b=btn: b.config(fg=C["fg"]) if b.cget("fg") == C["fg_dim"] else None)
+            btn.bind("<Leave>", lambda e, b=btn: b.config(fg=C["fg_dim"]) if b.cget("fg") == C["fg"] else None)
+            self._nav_btns[key] = btn
 
-        tk.Label(f, text="PDF OCR", font=("Segoe UI", 16, "bold"),
-                 bg="#f5f5f5", fg="#1a1a2e").pack(pady=(16, 2))
-        tk.Label(f, text="Converte PDF escaneado em PDF com texto pesquisável",
-                 font=("Segoe UI", 9), bg="#f5f5f5", fg="#555").pack(pady=(0, 10))
+        # área de conteúdo
+        self._content = tk.Frame(self, bg=C["bg"])
+        self._content.pack(side="left", fill="both", expand=True)
 
-        frame_in = tk.Frame(f, bg="#f5f5f5")
-        frame_in.pack(fill="x", **pad)
-        tk.Label(frame_in, text="PDF de entrada:", width=14, anchor="w",
-                 bg="#f5f5f5").pack(side="left")
-        tk.Entry(frame_in, textvariable=self.input_path, width=44,
-                 state="readonly").pack(side="left", padx=(0, 6))
-        tk.Button(frame_in, text="Abrir", command=self._browse_input,
-                  width=8).pack(side="left")
+        # título da página
+        self._title_bar = tk.Frame(self._content, bg=C["bg"], padx=24, pady=14)
+        self._title_bar.pack(fill="x")
+        self._page_title = tk.Label(self._title_bar, text="",
+                                    font=("Segoe UI", 14, "bold"),
+                                    bg=C["bg"], fg=C["fg_bright"])
+        self._page_title.pack(side="left")
+        self._page_sub = tk.Label(self._title_bar, text="",
+                                  font=("Segoe UI", 9),
+                                  bg=C["bg"], fg=C["fg_dim"])
+        self._page_sub.pack(side="left", padx=(10, 0), pady=(3, 0))
 
-        frame_out = tk.Frame(f, bg="#f5f5f5")
-        frame_out.pack(fill="x", **pad)
-        tk.Label(frame_out, text="PDF de saída:", width=14, anchor="w",
-                 bg="#f5f5f5").pack(side="left")
-        tk.Entry(frame_out, textvariable=self.output_path, width=44,
-                 state="readonly").pack(side="left", padx=(0, 6))
-        tk.Button(frame_out, text="Salvar", command=self._browse_output,
-                  width=8).pack(side="left")
+        tk.Frame(self._content, bg=C["border"], height=1).pack(fill="x")
 
-        frame_lang = tk.Frame(f, bg="#f5f5f5")
-        frame_lang.pack(fill="x", **pad)
-        tk.Label(frame_lang, text="Idioma OCR:", width=14, anchor="w",
-                 bg="#f5f5f5").pack(side="left")
-        lang_combo = ttk.Combobox(frame_lang, textvariable=self.lang,
-                                  width=26, state="readonly")
+        # container das páginas
+        self._pages = tk.Frame(self._content, bg=C["bg"])
+        self._pages.pack(fill="both", expand=True)
+
+        self._build_ocr_page()
+        self._build_about_page()
+
+    def _show_page(self, key):
+        if self._active_page == key:
+            return
+        self._active_page = key
+        for k, frame in self._page_frames.items():
+            frame.pack_forget()
+        self._page_frames[key].pack(fill="both", expand=True, padx=0, pady=0)
+
+        # atualiza destaque da sidebar
+        for k, btn in self._nav_btns.items():
+            if k == key:
+                btn.config(fg=C["accent"], bg=C["hover"])
+                btn.unbind("<Enter>")
+                btn.unbind("<Leave>")
+            else:
+                btn.config(fg=C["fg_dim"], bg=C["sidebar"])
+                btn.bind("<Enter>", lambda e, b=btn: b.config(fg=C["fg"]) if b.cget("fg") == C["fg_dim"] else None)
+                btn.bind("<Leave>", lambda e, b=btn: b.config(fg=C["fg_dim"]) if b.cget("fg") == C["fg"] else None)
+
+        titles = {
+            "ocr":   ("OCR",   "Converta PDFs escaneados em PDFs pesquisáveis"),
+            "about": ("Sobre", f"PDF OCR  v{APP_VERSION}"),
+        }
+        t, s = titles[key]
+        self._page_title.config(text=t)
+        self._page_sub.config(text=s)
+
+    # ── Página OCR ────────────────────────────────────────────
+
+    def _build_ocr_page(self):
+        page = tk.Frame(self._pages, bg=C["bg"])
+        self._page_frames["ocr"] = page
+
+        pad = {"padx": 24, "pady": 0}
+
+        # card principal
+        card = tk.Frame(page, bg=C["panel"],
+                        highlightthickness=1,
+                        highlightbackground=C["border"])
+        card.pack(fill="x", padx=24, pady=20)
+
+        def row(label, var, browse_cmd, btn_text):
+            f = tk.Frame(card, bg=C["panel"])
+            f.pack(fill="x", padx=16, pady=(12, 0))
+            tk.Label(f, text=label, width=13, anchor="w",
+                     font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
+            e = tk.Entry(f, textvariable=var, state="readonly",
+                         font=("Segoe UI", 9), width=46)
+            _style_entry(e)
+            e.pack(side="left", ipady=5, padx=(0, 8))
+            _flat_btn(f, text=btn_text, command=browse_cmd,
+                      padx=10, pady=4).pack(side="left")
+
+        row("PDF de entrada", self.input_path,  self._browse_input,  "Abrir")
+        row("PDF de saída",   self.output_path, self._browse_output, "Salvar")
+
+        # idioma
+        lang_f = tk.Frame(card, bg=C["panel"])
+        lang_f.pack(fill="x", padx=16, pady=(12, 16))
+        tk.Label(lang_f, text="Idioma OCR", width=13, anchor="w",
+                 font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
+        lang_combo = ttk.Combobox(lang_f, textvariable=self.lang,
+                                  width=30, state="readonly",
+                                  font=("Segoe UI", 9))
         lang_combo["values"] = [
             "por — Português",
             "eng — Inglês",
@@ -526,81 +749,118 @@ class PDFOcrApp(tk.Tk):
             "deu — Alemão",
         ]
         lang_combo.current(0)
-        lang_combo.pack(side="left")
+        lang_combo.pack(side="left", ipady=4)
         lang_combo.bind("<<ComboboxSelected>>", self._on_lang_select)
 
-        tk.Label(f, textvariable=self.status, font=("Segoe UI", 9),
-                 bg="#f5f5f5", fg="#444").pack(pady=(14, 2))
-        self.pb = ttk.Progressbar(f, variable=self.progress_var,
-                                  maximum=100, length=580)
-        self.pb.pack(padx=16)
+        # status + barra de progresso
+        status_f = tk.Frame(page, bg=C["bg"])
+        status_f.pack(fill="x", **pad, pady=(4, 6))
+        tk.Label(status_f, textvariable=self.status,
+                 font=("Segoe UI", 9), bg=C["bg"], fg=C["fg_dim"],
+                 anchor="w").pack(fill="x")
 
-        frame_btn = tk.Frame(f, bg="#f5f5f5")
-        frame_btn.pack(pady=14)
-        self.btn_run = tk.Button(
-            frame_btn, text="▶  Iniciar OCR",
+        self.pb = CanvasProgressBar(page, height=6)
+        self.pb.pack(fill="x", padx=24, pady=(0, 16))
+        # fazer o progress_var driver
+        self.progress_var.trace_add("write", lambda *_: self.pb.set(self.progress_var.get()))
+
+        # botões de ação
+        btn_f = tk.Frame(page, bg=C["bg"])
+        btn_f.pack(fill="x", **pad)
+        self.btn_run = _accent_btn(
+            btn_f, text="  ▶  Iniciar OCR  ",
+            command=self._start,
             font=("Segoe UI", 10, "bold"),
-            bg="#1a1a2e", fg="white",
-            activebackground="#333", activeforeground="white",
-            relief="flat", padx=18, pady=8,
-            command=self._start
+            padx=18, pady=9
         )
-        self.btn_run.pack(side="left", padx=8)
-        tk.Button(frame_btn, text="Limpar", font=("Segoe UI", 10),
-                  relief="flat", padx=14, pady=8,
-                  command=self._clear).pack(side="left", padx=8)
+        self.btn_run.pack(side="left", padx=(0, 10))
+        _flat_btn(btn_f, text="Limpar",
+                  command=self._clear,
+                  padx=14, pady=9).pack(side="left")
 
-    # ── Aba Sobre ─────────────────────────────────────────────
+    # ── Página Sobre ──────────────────────────────────────────
 
-    def _build_about_tab(self):
-        f = self.tab_about
+    def _build_about_page(self):
+        page = tk.Frame(self._pages, bg=C["bg"])
+        self._page_frames["about"] = page
 
-        tk.Label(f, text="PDF OCR", font=("Segoe UI", 20, "bold"),
-                 bg="#f5f5f5", fg="#1a1a2e").pack(pady=(24, 4))
-        tk.Label(f, text=f"Versão {APP_VERSION}",
-                 font=("Segoe UI", 11), bg="#f5f5f5", fg="#555").pack()
-        tk.Label(f,
+        # card info
+        card = tk.Frame(page, bg=C["panel"],
+                        highlightthickness=1,
+                        highlightbackground=C["border"])
+        card.pack(fill="x", padx=24, pady=20)
+
+        inner = tk.Frame(card, bg=C["panel"], padx=20, pady=18)
+        inner.pack(fill="x")
+
+        tk.Label(inner, text=f"PDF OCR",
+                 font=("Segoe UI", 18, "bold"),
+                 bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
+
+        badge_f = tk.Frame(inner, bg=C["panel"])
+        badge_f.pack(anchor="w", pady=(4, 0))
+        tk.Label(badge_f, text=f"v{APP_VERSION}",
+                 font=("Segoe UI", 9, "bold"),
+                 bg=C["accent_dk"], fg=C["fg_bright"],
+                 padx=8, pady=2).pack(side="left")
+        tk.Label(badge_f, text="  MIT License",
+                 font=("Segoe UI", 9),
+                 bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
+
+        tk.Label(inner,
                  text="Converte PDFs escaneados em PDFs pesquisáveis usando OCR.\n"
                       "Desenvolvido com Python, Tesseract e Tkinter.",
-                 font=("Segoe UI", 9), bg="#f5f5f5", fg="#444",
-                 justify="center").pack(pady=(10, 4))
+                 font=("Segoe UI", 9), bg=C["panel"], fg=C["fg"],
+                 justify="left").pack(anchor="w", pady=(10, 8))
 
-        link = tk.Label(f, text=f"github.com/{GITHUB_USER}/{GITHUB_REPO}",
+        link = tk.Label(inner,
+                        text=f"github.com/{GITHUB_USER}/{GITHUB_REPO}",
                         font=("Segoe UI", 9, "underline"),
-                        bg="#f5f5f5", fg="#0066cc", cursor="hand2")
-        link.pack()
+                        bg=C["panel"], fg=C["accent"], cursor="hand2")
+        link.pack(anchor="w")
         link.bind("<Button-1>", lambda _: webbrowser.open(
             f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}"))
 
-        ttk.Separator(f, orient="horizontal").pack(fill="x", padx=40, pady=18)
+        tk.Frame(inner, bg=C["border"], height=1).pack(fill="x", pady=(14, 0))
 
-        self.auto_update_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(
-            f,
+        tk.Label(inner,
+                 text="Autor: Nicolas Almeida Hader Dias",
+                 font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack(anchor="w", pady=(10, 0))
+
+        # card atualização
+        upd_card = tk.Frame(page, bg=C["panel"],
+                            highlightthickness=1,
+                            highlightbackground=C["border"])
+        upd_card.pack(fill="x", padx=24)
+
+        upd_inner = tk.Frame(upd_card, bg=C["panel"], padx=20, pady=16)
+        upd_inner.pack(fill="x")
+
+        tk.Label(upd_inner, text="Atualizações",
+                 font=("Segoe UI", 10, "bold"),
+                 bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
+
+        chk_f = tk.Frame(upd_inner, bg=C["panel"])
+        chk_f.pack(anchor="w", pady=(8, 0))
+        ttk.Checkbutton(
+            chk_f,
             text="Verificar atualizações automaticamente ao iniciar",
             variable=self.auto_update_var,
-            bg="#f5f5f5", font=("Segoe UI", 9),
+            style="TCheckbutton",
             command=self._save_prefs
-        ).pack()
+        ).pack(side="left")
 
-        self.update_status = tk.StringVar(value="")
-        tk.Label(f, textvariable=self.update_status,
-                 font=("Segoe UI", 9), bg="#f5f5f5", fg="#555").pack(pady=(6, 0))
+        status_f = tk.Frame(upd_inner, bg=C["panel"])
+        status_f.pack(anchor="w", pady=(8, 0), fill="x")
+        tk.Label(status_f, textvariable=self.update_status,
+                 font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
 
-        self.btn_update = tk.Button(
-            f, text="🔄  Verificar Atualização",
-            font=("Segoe UI", 10),
-            bg="#1a1a2e", fg="white",
-            activebackground="#333", activeforeground="white",
-            relief="flat", padx=16, pady=7,
-            command=self._check_update_manual
+        self.btn_update = _accent_btn(
+            upd_inner, text="  Verificar atualização  ",
+            command=self._check_update_manual,
+            padx=14, pady=7
         )
-        self.btn_update.pack(pady=(10, 0))
-
-        tk.Label(f,
-                 text="© 2025 Nicolas Almeida Hader Dias  •  MIT License",
-                 font=("Segoe UI", 8), bg="#f5f5f5", fg="#aaa").pack(
-            side="bottom", pady=12)
+        self.btn_update.pack(anchor="w", pady=(12, 0))
 
         self.after(1500, self._auto_update_check)
 
@@ -644,10 +904,8 @@ class PDFOcrApp(tk.Tk):
             info    = fetch_latest_release()
             current = version_tuple(APP_VERSION)
             remote  = version_tuple(info["tag"])
-
             if remote > current:
-                self.after(0, lambda: self.update_status.set(
-                    f"Nova versão v{info['tag']} disponível!"))
+                self.after(0, lambda: self.update_status.set(f"Nova versão v{info['tag']} disponível!"))
                 self.after(0, lambda: UpdateDialog(self, info))
             else:
                 msg = f"Você está na versão mais recente (v{APP_VERSION})"
@@ -658,8 +916,7 @@ class PDFOcrApp(tk.Tk):
             msg = f"Não foi possível verificar: {e}"
             self.after(0, lambda: self.update_status.set(msg))
             if manual:
-                self.after(0, lambda: messagebox.showwarning(
-                    "Verificação de atualização", msg))
+                self.after(0, lambda: messagebox.showwarning("Verificação de atualização", msg))
         finally:
             self.after(0, lambda: self.btn_update.config(state="normal"))
 
@@ -707,8 +964,7 @@ class PDFOcrApp(tk.Tk):
             messagebox.showerror(
                 "Tesseract não encontrado",
                 "O Tesseract OCR não foi encontrado.\n\n"
-                "Baixe e instale em:\n"
-                "https://github.com/UB-Mannheim/tesseract/wiki"
+                "Baixe e instale em:\nhttps://github.com/UB-Mannheim/tesseract/wiki"
             )
             return
         if self._running:
