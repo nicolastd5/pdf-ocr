@@ -386,18 +386,23 @@ class UpdateDialog(tk.Toplevel):
         current_exe = sys.executable if getattr(sys, "frozen", False) else None
 
         if current_exe and os.path.isfile(current_exe):
-            # Cria script .bat que: espera o processo atual fechar, copia o novo exe e reinicia
+            pid = os.getpid()
             bat_path = os.path.join(tempfile.gettempdir(), "pdfocr_update.bat")
             with open(bat_path, "w") as f:
                 f.write(f"""@echo off
-ping 127.0.0.1 -n 6 > nul
+:wait
+tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul
+if not errorlevel 1 (
+    ping 127.0.0.1 -n 2 > nul
+    goto wait
+)
 copy /Y "{new_exe}" "{current_exe}"
 if errorlevel 1 (
-    echo Falha ao copiar o executavel. Tente manualmente.
-    pause
+    msg * "PDF OCR: falha ao instalar atualização. Copie manualmente: {new_exe}"
     goto :eof
 )
 start "" "{current_exe}"
+del "{new_exe}"
 del "%~f0"
 """)
             self._prog_label.config(text="Instalando atualização...")
