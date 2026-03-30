@@ -732,8 +732,11 @@ class PDFOcrApp(tk.Tk):
 
                 for j in range(len(ocr_data["text"])):
                     word = ocr_data["text"][j]
-                    conf = int(ocr_data["conf"][j])
-                    if not word.strip() or conf <= 0:
+                    try:
+                        conf = int(ocr_data["conf"][j])
+                    except (TypeError, ValueError):
+                        conf = -1
+                    if not word or not word.strip() or conf <= 0:
                         continue
                     x, y = ocr_data["left"][j], ocr_data["top"][j]
                     w, h = ocr_data["width"][j], ocr_data["height"][j]
