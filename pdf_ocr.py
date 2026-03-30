@@ -10,6 +10,7 @@ import threading
 import os
 import sys
 import json
+import ssl
 import webbrowser
 import urllib.request
 import urllib.error
@@ -30,7 +31,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.9.2"
+APP_VERSION = "0.9.3"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -127,12 +128,26 @@ def version_tuple(v):
         return (0,)
 
 
+def _make_ssl_ctx():
+    """Retorna um SSLContext verificado; cai para não-verificado se necessário."""
+    try:
+        return ssl.create_default_context()
+    except Exception:
+        return ssl._create_unverified_context()
+
+
 def fetch_latest_release():
     req = urllib.request.Request(
         GITHUB_RELEASES_API,
         headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"}
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    try:
+        ctx = _make_ssl_ctx()
+        opener = urllib.request.urlopen(req, timeout=15, context=ctx)
+    except TypeError:
+        # Python antigo sem parâmetro context
+        opener = urllib.request.urlopen(req, timeout=15)
+    with opener as resp:
         data = json.loads(resp.read().decode())
 
     tag  = data.get("tag_name", "").lstrip("v")
@@ -470,7 +485,11 @@ class UpdateDialog(tk.Toplevel):
             tmp_dir = tempfile.mkdtemp(prefix="pdfocr_update_")
             tmp_exe = os.path.join(tmp_dir, "PDF_OCR_new.exe")
             req = urllib.request.Request(url, headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"})
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            try:
+                _resp_ctx = urllib.request.urlopen(req, timeout=300, context=_make_ssl_ctx())
+            except TypeError:
+                _resp_ctx = urllib.request.urlopen(req, timeout=300)
+            with _resp_ctx as resp:
                 total      = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 chunk      = 65536
@@ -558,8 +577,9 @@ class PDFOcrApp(tk.Tk):
 
     # ícones unicode para a sidebar
     _NAV = [
-        ("ocr",   "⬡", "OCR"),
-        ("about", "ℹ", "Sobre"),
+        ("ocr",      "⬡", "OCR"),
+        ("compress", "⊜", "Comprimir"),
+        ("about",    "ℹ", "Sobre"),
     ]
 
     def __init__(self):
@@ -570,15 +590,18 @@ class PDFOcrApp(tk.Tk):
         self.resizable(True, False)
         self.configure(bg=C["bg"])
 
-        self.input_path         = tk.StringVar()
-        self.output_path        = tk.StringVar()
-        self.lang               = tk.StringVar(value="por")
-        self.status             = tk.StringVar(value="Aguardando arquivo...")
-        self.progress_var       = tk.DoubleVar(value=0)
-        self.auto_update_var    = tk.BooleanVar(value=True)
-        self.update_status      = tk.StringVar(value="")
-        self.highlight_names_var = tk.BooleanVar(value=True)
-        self.compress_var       = tk.BooleanVar(value=False)
+        self.input_path           = tk.StringVar()
+        self.output_path          = tk.StringVar()
+        self.lang                 = tk.StringVar(value="por")
+        self.status               = tk.StringVar(value="Aguardando arquivo...")
+        self.progress_var         = tk.DoubleVar(value=0)
+        self.auto_update_var      = tk.BooleanVar(value=True)
+        self.update_status        = tk.StringVar(value="")
+        self.highlight_names_var  = tk.BooleanVar(value=True)
+        self.compress_input_path  = tk.StringVar()
+        self.compress_output_path = tk.StringVar()
+        self.compress_status      = tk.StringVar(value="Selecione um PDF para comprimir.")
+        self._compress_running    = False
         self._running        = False
         self._spinner        = None
         self._active_page    = None
@@ -690,6 +713,7 @@ class PDFOcrApp(tk.Tk):
         self._pages.pack(fill="both", expand=True)
 
         self._build_ocr_page()
+        self._build_compress_page()
         self._build_about_page()
 
     def _show_page(self, key):
@@ -709,8 +733,9 @@ class PDFOcrApp(tk.Tk):
                 btn.config(fg=C["fg_dim"], bg=C["sidebar"])
 
         titles = {
-            "ocr":   ("OCR",   "Converta PDFs escaneados em PDFs pesquisáveis"),
-            "about": ("Sobre", f"PDF OCR  v{APP_VERSION}"),
+            "ocr":      ("OCR",       "Converta PDFs escaneados em PDFs pesquisáveis"),
+            "compress": ("Comprimir", "Reduza o tamanho de PDFs existentes"),
+            "about":    ("Sobre",     f"PDF OCR  v{APP_VERSION}"),
         }
         t, s = titles[key]
         self._page_title.config(text=t)
@@ -772,13 +797,6 @@ class PDFOcrApp(tk.Tk):
             variable=self.highlight_names_var,
             style="TCheckbutton",
             command=self._save_prefs
-        ).pack(side="left", padx=(0, 20))
-        ttk.Checkbutton(
-            opts_f,
-            text="Comprimir PDF",
-            variable=self.compress_var,
-            style="TCheckbutton",
-            command=self._save_prefs
         ).pack(side="left")
 
         # status + barra de progresso
@@ -804,6 +822,188 @@ class PDFOcrApp(tk.Tk):
         _flat_btn(btn_f, text="Limpar",
                   command=self._clear,
                   padx=14, pady=9).pack(side="left")
+
+    # ── Página Comprimir ─────────────────────────────────────
+
+    def _build_compress_page(self):
+        page = tk.Frame(self._pages, bg=C["bg"])
+        self._page_frames["compress"] = page
+
+        card = tk.Frame(page, bg=C["panel"],
+                        highlightthickness=1,
+                        highlightbackground=C["border"])
+        card.pack(fill="x", padx=24, pady=20)
+
+        def row(label, var, browse_cmd, btn_text):
+            f = tk.Frame(card, bg=C["panel"])
+            f.pack(fill="x", padx=16, pady=(12, 0))
+            tk.Label(f, text=label, width=13, anchor="w",
+                     font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
+            e = tk.Entry(f, textvariable=var, state="readonly",
+                         font=("Segoe UI", 9), width=46)
+            _style_entry(e)
+            e.pack(side="left", ipady=5, padx=(0, 8))
+            _flat_btn(f, text=btn_text, command=browse_cmd,
+                      padx=10, pady=4).pack(side="left")
+
+        row("PDF de entrada", self.compress_input_path,
+            self._browse_compress_input, "Abrir")
+        row("PDF de saída",   self.compress_output_path,
+            self._browse_compress_output, "Salvar")
+
+        # Nota informativa
+        info_f = tk.Frame(card, bg=C["panel"])
+        info_f.pack(fill="x", padx=16, pady=(10, 16))
+        tk.Label(info_f,
+                 text="Converte as páginas para imagem JPEG (150 DPI, qualidade 65%).\n"
+                      "O tamanho do arquivo é reduzido significativamente.",
+                 font=("Segoe UI", 8), bg=C["panel"], fg=C["fg_dim"],
+                 justify="left").pack(anchor="w")
+
+        # Status + barra de progresso
+        status_f = tk.Frame(page, bg=C["bg"])
+        status_f.pack(fill="x", padx=24, pady=(4, 6))
+        tk.Label(status_f, textvariable=self.compress_status,
+                 font=("Segoe UI", 9), bg=C["bg"], fg=C["fg_dim"],
+                 anchor="w").pack(fill="x")
+
+        self.compress_pb = CanvasProgressBar(page, height=6)
+        self.compress_pb.pack(fill="x", padx=24, pady=(0, 16))
+
+        # Botões
+        btn_f = tk.Frame(page, bg=C["bg"])
+        btn_f.pack(fill="x", padx=24)
+        self.btn_compress = _accent_btn(
+            btn_f, text="  ⊜  Comprimir PDF  ",
+            command=self._start_compress,
+            font=("Segoe UI", 10, "bold"),
+            padx=18, pady=9
+        )
+        self.btn_compress.pack(side="left", padx=(0, 10))
+        _flat_btn(btn_f, text="Limpar",
+                  command=self._clear_compress,
+                  padx=14, pady=9).pack(side="left")
+
+    # ── Comprimir eventos ─────────────────────────────────────
+
+    def _browse_compress_input(self):
+        path = filedialog.askopenfilename(
+            title="Selecionar PDF para comprimir",
+            filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")]
+        )
+        if path:
+            self.compress_input_path.set(path)
+            self.compress_output_path.set(
+                os.path.splitext(path)[0] + "_comprimido.pdf")
+
+    def _browse_compress_output(self):
+        path = filedialog.asksaveasfilename(
+            title="Salvar PDF comprimido",
+            defaultextension=".pdf",
+            filetypes=[("Arquivos PDF", "*.pdf")]
+        )
+        if path:
+            self.compress_output_path.set(path)
+
+    def _clear_compress(self):
+        self.compress_input_path.set("")
+        self.compress_output_path.set("")
+        self.compress_pb.set(0)
+        self.compress_status.set("Selecione um PDF para comprimir.")
+
+    def _start_compress(self):
+        if not DEPS_OK:
+            self._show_dep_error()
+            return
+        if not self.compress_input_path.get():
+            messagebox.showwarning("Aviso", "Selecione um PDF de entrada.")
+            return
+        if not self.compress_output_path.get():
+            messagebox.showwarning("Aviso", "Defina o caminho do PDF de saída.")
+            return
+        if self._compress_running:
+            return
+        self._compress_running = True
+        self.btn_compress.config(state="disabled")
+        self.compress_pb.set(0)
+        threading.Thread(
+            target=self._run_compress,
+            args=(self.compress_input_path.get(),
+                  self.compress_output_path.get()),
+            daemon=True
+        ).start()
+
+    def _run_compress(self, input_pdf, output_pdf):
+        tmp_files = []
+        try:
+            self.after(0, lambda: self.compress_status.set(
+                "Convertendo páginas para imagem..."))
+            poppler_path = find_poppler()
+            pages = convert_from_path(input_pdf, dpi=150,
+                                      poppler_path=poppler_path)
+            total = len(pages)
+            page_buffers = []
+
+            for i, pil_img in enumerate(pages, 1):
+                self.after(0, lambda i=i: self.compress_status.set(
+                    f"Comprimindo página {i} / {total}..."))
+
+                img_w, img_h = pil_img.size
+
+                # Salva como JPEG em arquivo temporário; ReportLab embutirá
+                # o JPEG diretamente sem re-encodar, garantindo compressão real.
+                tf = tempfile.NamedTemporaryFile(
+                    suffix=".jpg", delete=False)
+                tmp_files.append(tf.name)
+                pil_img.convert("RGB").save(
+                    tf, format="JPEG", quality=65, optimize=True,
+                    progressive=True)
+                tf.close()
+
+                buf = io.BytesIO()
+                c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
+                c.drawImage(tf.name, 0, 0, width=img_w, height=img_h)
+                c.save()
+                page_buffers.append(buf.getvalue())
+
+                pct = i / total * 95
+                self.after(0, lambda p=pct: self.compress_pb.set(p))
+
+            self.after(0, lambda: self.compress_status.set(
+                "Gerando PDF final..."))
+            merger = PyPDF2.PdfWriter()
+            for pb in page_buffers:
+                merger.add_page(PyPDF2.PdfReader(io.BytesIO(pb)).pages[0])
+            with open(output_pdf, "wb") as f:
+                merger.write(f)
+
+            orig_kb = os.path.getsize(input_pdf) // 1024
+            new_kb  = os.path.getsize(output_pdf) // 1024
+            ratio   = (1 - new_kb / orig_kb) * 100 if orig_kb > 0 else 0
+
+            self.after(0, lambda: self.compress_pb.set(100))
+            self.after(0, lambda: self.compress_status.set(
+                f"Concluído! {orig_kb} KB → {new_kb} KB  "
+                f"(redução de {ratio:.0f}%)"))
+            self.after(0, lambda: messagebox.showinfo(
+                "Compressão concluída",
+                f"PDF comprimido gerado!\n\n{output_pdf}\n\n"
+                f"Tamanho original : {orig_kb} KB\n"
+                f"Tamanho final    : {new_kb} KB\n"
+                f"Redução          : {ratio:.0f}%"
+            ))
+        except Exception as e:
+            self.after(0, lambda: messagebox.showerror(
+                "Erro durante compressão", str(e)))
+            self.after(0, lambda: self.compress_status.set(f"Erro: {e}"))
+        finally:
+            for f in tmp_files:
+                try:
+                    os.unlink(f)
+                except Exception:
+                    pass
+            self._compress_running = False
+            self.after(0, lambda: self.btn_compress.config(state="normal"))
 
     # ── Página Sobre ──────────────────────────────────────────
 
@@ -904,7 +1104,6 @@ class PDFOcrApp(tk.Tk):
                 data = json.load(f)
             self.auto_update_var.set(data.get("auto_update", True))
             self.highlight_names_var.set(data.get("highlight_names", True))
-            self.compress_var.set(data.get("compress_pdf", False))
         except Exception:
             pass
 
@@ -914,7 +1113,6 @@ class PDFOcrApp(tk.Tk):
                 json.dump({
                     "auto_update": self.auto_update_var.get(),
                     "highlight_names": self.highlight_names_var.get(),
-                    "compress_pdf": self.compress_var.get(),
                 }, f)
         except Exception:
             pass
@@ -1014,7 +1212,7 @@ class PDFOcrApp(tk.Tk):
         threading.Thread(
             target=self._run_ocr,
             args=(self.input_path.get(), self.output_path.get(), lang,
-                  self.highlight_names_var.get(), self.compress_var.get()),
+                  self.highlight_names_var.get()),
             daemon=True
         ).start()
 
@@ -1094,8 +1292,7 @@ class PDFOcrApp(tk.Tk):
                 i += 1
         return names
 
-    def _run_ocr(self, input_pdf, output_pdf, lang,
-                 highlight_names=True, compress=False):
+    def _run_ocr(self, input_pdf, output_pdf, lang, highlight_names=True):
         try:
             self._spinner_status("Convertendo páginas para imagem...")
             poppler_path = find_poppler()
@@ -1112,19 +1309,9 @@ class PDFOcrApp(tk.Tk):
                     pil_img, lang=lang, output_type=pytesseract.Output.DICT)
                 img_w, img_h = pil_img.size
 
-                # Compressão: converte imagem para JPEG antes de embutir no PDF
-                if compress:
-                    _cbuf = io.BytesIO()
-                    pil_img.convert("RGB").save(_cbuf, format="JPEG",
-                                                quality=60, optimize=True)
-                    _cbuf.seek(0)
-                    img_to_draw = Image.open(_cbuf)
-                else:
-                    img_to_draw = pil_img
-
                 buf = io.BytesIO()
                 c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
-                c.drawImage(ImageReader(img_to_draw), 0, 0, width=img_w, height=img_h)
+                c.drawImage(ImageReader(pil_img), 0, 0, width=img_w, height=img_h)
 
                 # Destaque de nomes de pessoas (retângulo âmbar semi-transparente)
                 if highlight_names:
@@ -1184,15 +1371,10 @@ class PDFOcrApp(tk.Tk):
             self.after(0, lambda: (self.progress_var.set(100), self.pb.set(100)))
             self._set_status(f"Concluído! {os.path.basename(output_pdf)}")
             self.after(0, self._close_spinner)
-            extras = []
-            if highlight_names:
-                extras.append("nomes destacados em amarelo")
-            if compress:
-                extras.append("PDF comprimido")
-            extra_msg = f"\n({', '.join(extras)})" if extras else ""
+            extra = "\n(nomes destacados em amarelo)" if highlight_names else ""
             self.after(0, lambda: messagebox.showinfo(
                 "Sucesso",
-                f"PDF pesquisável gerado!\n\n{output_pdf}{extra_msg}\n\n"
+                f"PDF pesquisável gerado!\n\n{output_pdf}{extra}\n\n"
                 "Use CTRL+F no seu leitor de PDF para pesquisar."
             ))
         except Exception as e:
