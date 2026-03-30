@@ -35,61 +35,6 @@ GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases"
-LICENSE_SERVER = "https://pdf-ocr-7ox6.onrender.com"
-LICENSE_FILE_NAME = "pdf_ocr_license.json"
-
-
-def _get_hw_id():
-    """Gera um ID estável baseado no nome do computador + username."""
-    import hashlib
-    raw = f"{os.environ.get('COMPUTERNAME','')}-{os.environ.get('USERNAME','')}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:32]
-
-
-def _license_path():
-    base = os.path.dirname(sys.executable if getattr(sys, "frozen", False)
-                           else os.path.abspath(__file__))
-    return os.path.join(base, LICENSE_FILE_NAME)
-
-
-def _load_license():
-    """Retorna {'key': ..., 'hw_id': ...} ou None."""
-    try:
-        with open(_license_path()) as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def _save_license(key: str, hw_id: str):
-    with open(_license_path(), "w") as f:
-        json.dump({"key": key, "hw_id": hw_id}, f)
-
-
-def validate_license_online(key: str, hw_id: str):
-    """
-    Retorna (True, mensagem) ou (False, mensagem_de_erro).
-    """
-    import urllib.request, urllib.error, json as _json
-    payload = _json.dumps({"key": key, "hw_id": hw_id}).encode()
-    req = urllib.request.Request(
-        f"{LICENSE_SERVER}/validate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
-            data = _json.loads(resp.read())
-            return True, data.get("message", "OK")
-    except urllib.error.HTTPError as e:
-        try:
-            detail = _json.loads(e.read()).get("detail", str(e))
-        except Exception:
-            detail = str(e)
-        return False, detail
-    except Exception as e:
-        return False, f"Sem conexão com servidor de licenças: {e}"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -605,138 +550,6 @@ del "%~f0"
         messagebox.showerror("Falha no download", msg, parent=self)
 
 
-class LicenseDialog(tk.Toplevel):
-    """Tela de ativação de licença mostrada quando não há licença válida."""
-
-    def __init__(self, parent, saved_license=None):
-        super().__init__(parent)
-        self.title("Ativar PDF OCR")
-        self.resizable(False, False)
-        self.configure(bg=C["bg"])
-        self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.result = False  # True se ativação ok
-
-        hw_id = _get_hw_id()
-
-        # ── Layout ──────────────────────────────────────────────
-        wrap = tk.Frame(self, bg=C["bg"], padx=32, pady=24)
-        wrap.pack()
-
-        tk.Label(wrap, text="PDF OCR", font=("Segoe UI", 18, "bold"),
-                 bg=C["bg"], fg=C["accent"]).pack(pady=(0, 4))
-        tk.Label(wrap, text="Ativação de Licença",
-                 font=("Segoe UI", 11), bg=C["bg"], fg=C["fg"]).pack(pady=(0, 20))
-
-        # Hardware ID (somente leitura, para o usuário enviar ao admin)
-        hw_frame = tk.Frame(wrap, bg=C["panel"], bd=0, highlightthickness=1,
-                            highlightbackground=C["border"])
-        hw_frame.pack(fill="x", pady=(0, 16))
-        tk.Label(hw_frame, text="Seu ID de computador:",
-                 bg=C["panel"], fg=C["fg_dim"],
-                 font=("Segoe UI", 8), anchor="w").pack(fill="x", padx=10, pady=(8, 0))
-        hw_entry = tk.Entry(hw_frame, font=("Consolas", 9))
-        _style_entry(hw_entry)
-        hw_entry.configure(state="normal")
-        hw_entry.insert(0, hw_id)
-        hw_entry.configure(state="readonly")
-        hw_entry.pack(fill="x", padx=10, pady=(2, 8))
-
-        # Botão copiar ID
-        def _copy_hw():
-            self.clipboard_clear()
-            self.clipboard_append(hw_id)
-            copy_btn.configure(text="Copiado!")
-            self.after(2000, lambda: copy_btn.configure(text="Copiar ID"))
-        copy_btn = _flat_btn(hw_frame, "Copiar ID", _copy_hw,
-                             font=("Segoe UI", 8))
-        copy_btn.configure(bg=C["input"])
-        copy_btn.pack(anchor="e", padx=10, pady=(0, 8))
-
-        # Campo de chave
-        tk.Label(wrap, text="Chave de licença:",
-                 bg=C["bg"], fg=C["fg"], font=("Segoe UI", 10), anchor="w").pack(fill="x")
-        self.key_entry = tk.Entry(wrap, font=("Consolas", 11), width=36)
-        _style_entry(self.key_entry)
-        self.key_entry.pack(fill="x", pady=(4, 4))
-        self.key_entry.bind("<Return>", lambda _: self._activate())
-
-        # Exemplo de formato
-        tk.Label(wrap, text="Formato: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
-                 bg=C["bg"], fg=C["fg_dim"], font=("Segoe UI", 8)).pack(anchor="w")
-
-        # Status
-        self.status_var = tk.StringVar()
-        self.status_lbl = tk.Label(wrap, textvariable=self.status_var,
-                                   bg=C["bg"], fg=C["error"],
-                                   font=("Segoe UI", 9), wraplength=320)
-        self.status_lbl.pack(pady=(8, 0))
-
-        # Botão ativar
-        self.activate_btn = _accent_btn(wrap, "Ativar", self._activate,
-                                        font=("Segoe UI", 11, "bold"))
-        self.activate_btn.pack(fill="x", pady=(16, 0), ipady=6)
-
-        self._center()
-
-        # Se já tem licença salva, valida silenciosamente em background
-        if saved_license:
-            self.activate_btn.configure(state="disabled", text="Verificando...")
-            self.status_lbl.configure(fg=C["fg_dim"])
-            self.status_var.set("Verificando licença existente (pode levar até 30s)...")
-
-            def _silent_check():
-                ok, msg = validate_license_online(saved_license["key"], saved_license["hw_id"])
-                def _done():
-                    if ok:
-                        self.result = True
-                        self.destroy()
-                    else:
-                        # Licença inválida/revogada — libera para redigitar
-                        self.activate_btn.configure(state="normal", text="Ativar")
-                        self.status_lbl.configure(fg=C["error"])
-                        self.status_var.set(f"Licença inválida: {msg}")
-                self.after(0, _done)
-
-            threading.Thread(target=_silent_check, daemon=True).start()
-
-    def _center(self):
-        self.update_idletasks()
-        w, h = self.winfo_width(), self.winfo_height()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        self.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
-
-    def _activate(self):
-        key = self.key_entry.get().strip().upper()
-        if not key:
-            self.status_var.set("Digite a chave de licença.")
-            return
-        self.activate_btn.configure(state="disabled", text="Verificando...")
-        self.status_var.set("Conectando ao servidor (pode levar até 30s)...")
-        hw_id = _get_hw_id()
-
-        def _check():
-            ok, msg = validate_license_online(key, hw_id)
-            def _done():
-                self.activate_btn.configure(state="normal", text="Ativar")
-                self.status_var.set("")
-                if ok:
-                    _save_license(key, hw_id)
-                    self.result = True
-                    self.destroy()
-                else:
-                    self.status_lbl.configure(fg=C["error"])
-                    self.status_var.set(f"Erro: {msg}")
-            self.after(0, _done)
-
-        threading.Thread(target=_check, daemon=True).start()
-
-    def _on_close(self):
-        self.result = False
-        self.destroy()
-
-
 # ─────────────────────────────────────────────────────────────
 #  Main App
 # ─────────────────────────────────────────────────────────────
@@ -757,13 +570,15 @@ class PDFOcrApp(tk.Tk):
         self.resizable(True, False)
         self.configure(bg=C["bg"])
 
-        self.input_path      = tk.StringVar()
-        self.output_path     = tk.StringVar()
-        self.lang            = tk.StringVar(value="por")
-        self.status          = tk.StringVar(value="Aguardando arquivo...")
-        self.progress_var    = tk.DoubleVar(value=0)
-        self.auto_update_var = tk.BooleanVar(value=True)
-        self.update_status   = tk.StringVar(value="")
+        self.input_path         = tk.StringVar()
+        self.output_path        = tk.StringVar()
+        self.lang               = tk.StringVar(value="por")
+        self.status             = tk.StringVar(value="Aguardando arquivo...")
+        self.progress_var       = tk.DoubleVar(value=0)
+        self.auto_update_var    = tk.BooleanVar(value=True)
+        self.update_status      = tk.StringVar(value="")
+        self.highlight_names_var = tk.BooleanVar(value=True)
+        self.compress_var       = tk.BooleanVar(value=False)
         self._running        = False
         self._spinner        = None
         self._active_page    = None
@@ -948,6 +763,24 @@ class PDFOcrApp(tk.Tk):
         lang_combo.pack(side="left", ipady=4)
         lang_combo.bind("<<ComboboxSelected>>", self._on_lang_select)
 
+        # opções extras
+        opts_f = tk.Frame(card, bg=C["panel"])
+        opts_f.pack(fill="x", padx=16, pady=(4, 16))
+        ttk.Checkbutton(
+            opts_f,
+            text="Destacar nomes de pessoas no PDF",
+            variable=self.highlight_names_var,
+            style="TCheckbutton",
+            command=self._save_prefs
+        ).pack(side="left", padx=(0, 20))
+        ttk.Checkbutton(
+            opts_f,
+            text="Comprimir PDF",
+            variable=self.compress_var,
+            style="TCheckbutton",
+            command=self._save_prefs
+        ).pack(side="left")
+
         # status + barra de progresso
         status_f = tk.Frame(page, bg=C["bg"])
         status_f.pack(fill="x", padx=24, pady=(4, 6))
@@ -1070,13 +903,19 @@ class PDFOcrApp(tk.Tk):
             with open(self._prefs_path()) as f:
                 data = json.load(f)
             self.auto_update_var.set(data.get("auto_update", True))
+            self.highlight_names_var.set(data.get("highlight_names", True))
+            self.compress_var.set(data.get("compress_pdf", False))
         except Exception:
             pass
 
     def _save_prefs(self):
         try:
             with open(self._prefs_path(), "w") as f:
-                json.dump({"auto_update": self.auto_update_var.get()}, f)
+                json.dump({
+                    "auto_update": self.auto_update_var.get(),
+                    "highlight_names": self.highlight_names_var.get(),
+                    "compress_pdf": self.compress_var.get(),
+                }, f)
         except Exception:
             pass
 
@@ -1174,13 +1013,89 @@ class PDFOcrApp(tk.Tk):
         lang = lang_raw.split(" — ")[0] if " — " in lang_raw else lang_raw
         threading.Thread(
             target=self._run_ocr,
-            args=(self.input_path.get(), self.output_path.get(), lang),
+            args=(self.input_path.get(), self.output_path.get(), lang,
+                  self.highlight_names_var.get(), self.compress_var.get()),
             daemon=True
         ).start()
 
     # ── OCR core ──────────────────────────────────────────────
 
-    def _run_ocr(self, input_pdf, output_pdf, lang):
+    def _detect_names(self, ocr_data):
+        """
+        Retorna lista de (x, y, w, h) para sequências de nomes de pessoas detectadas.
+        Heurística: 2+ palavras consecutivas na mesma linha começando com maiúscula,
+        com comprimento mínimo de 2 caracteres e apenas letras/hífen.
+        Conectores comuns em nomes (de, da, do, etc.) são permitidos no meio.
+        """
+        _CONNECTORS = {"de", "da", "do", "das", "dos", "e", "von", "van", "del", "di"}
+        _SKIP = {"Rua", "Av", "Avenida", "Dr", "Prof", "Sr", "Sra", "Mês", "Janeiro",
+                 "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto",
+                 "Setembro", "Outubro", "Novembro", "Dezembro"}
+
+        names = []
+        n = len(ocr_data["text"])
+        i = 0
+        while i < n:
+            word = ocr_data["text"][i]
+            try:
+                conf = int(ocr_data["conf"][i])
+            except (TypeError, ValueError):
+                conf = -1
+            if not word or not word.strip() or conf <= 0:
+                i += 1
+                continue
+            # Palavra candidata a início de nome: começa com maiúscula, só letras/hífen, ≥2 chars
+            clean = word.replace("-", "")
+            if (word[0].isupper() and len(word) >= 2 and clean.isalpha()
+                    and word not in _SKIP):
+                group = [i]
+                j = i + 1
+                while j < n:
+                    nw = ocr_data["text"][j]
+                    try:
+                        nc = int(ocr_data["conf"][j])
+                    except (TypeError, ValueError):
+                        nc = -1
+                    # Mesma linha e mesmo bloco
+                    same_line = (
+                        ocr_data["line_num"][j] == ocr_data["line_num"][i]
+                        and ocr_data["block_num"][j] == ocr_data["block_num"][i]
+                    )
+                    if not same_line:
+                        break
+                    if not nw or not nw.strip():
+                        j += 1
+                        continue
+                    nw_clean = nw.replace("-", "")
+                    if nw.lower() in _CONNECTORS:
+                        group.append(j)
+                        j += 1
+                        continue
+                    if (nw[0].isupper() and len(nw) >= 2
+                            and nw_clean.isalpha() and nc > 0
+                            and nw not in _SKIP):
+                        group.append(j)
+                        j += 1
+                    else:
+                        break
+                # Conta palavras reais (sem conectores)
+                real = [k for k in group
+                        if ocr_data["text"][k].lower() not in _CONNECTORS]
+                if len(real) >= 2:
+                    xs  = [ocr_data["left"][k] for k in group]
+                    ys  = [ocr_data["top"][k]  for k in group]
+                    x2s = [ocr_data["left"][k] + ocr_data["width"][k]  for k in group]
+                    y2s = [ocr_data["top"][k]  + ocr_data["height"][k] for k in group]
+                    names.append((min(xs), min(ys),
+                                  max(x2s) - min(xs),
+                                  max(y2s) - min(ys)))
+                i = j
+            else:
+                i += 1
+        return names
+
+    def _run_ocr(self, input_pdf, output_pdf, lang,
+                 highlight_names=True, compress=False):
         try:
             self._spinner_status("Convertendo páginas para imagem...")
             poppler_path = find_poppler()
@@ -1196,11 +1111,39 @@ class PDFOcrApp(tk.Tk):
                 ocr_data = pytesseract.image_to_data(
                     pil_img, lang=lang, output_type=pytesseract.Output.DICT)
                 img_w, img_h = pil_img.size
+
+                # Compressão: converte imagem para JPEG antes de embutir no PDF
+                if compress:
+                    _cbuf = io.BytesIO()
+                    pil_img.convert("RGB").save(_cbuf, format="JPEG",
+                                                quality=60, optimize=True)
+                    _cbuf.seek(0)
+                    img_to_draw = Image.open(_cbuf)
+                else:
+                    img_to_draw = pil_img
+
                 buf = io.BytesIO()
                 c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
-                c.drawImage(ImageReader(pil_img), 0, 0, width=img_w, height=img_h)
-                c.setFillColorRGB(0, 0, 0, alpha=0)
+                c.drawImage(ImageReader(img_to_draw), 0, 0, width=img_w, height=img_h)
 
+                # Destaque de nomes de pessoas (retângulo âmbar semi-transparente)
+                if highlight_names:
+                    self._spinner_status("Detectando nomes de pessoas...")
+                    name_boxes = self._detect_names(ocr_data)
+                    if name_boxes:
+                        c.saveState()
+                        c.setFillColorRGB(1.0, 0.85, 0.0, alpha=0.35)
+                        for nx, ny, nw, nh in name_boxes:
+                            pad = 2
+                            c.rect(nx - pad,
+                                   img_h - ny - nh - pad,
+                                   nw + pad * 2,
+                                   nh + pad * 2,
+                                   fill=1, stroke=0)
+                        c.restoreState()
+
+                # Camada de texto invisível (pesquisável)
+                c.setFillColorRGB(0, 0, 0, alpha=0)
                 for j in range(len(ocr_data["text"])):
                     word = ocr_data["text"][j]
                     try:
@@ -1241,9 +1184,15 @@ class PDFOcrApp(tk.Tk):
             self.after(0, lambda: (self.progress_var.set(100), self.pb.set(100)))
             self._set_status(f"Concluído! {os.path.basename(output_pdf)}")
             self.after(0, self._close_spinner)
+            extras = []
+            if highlight_names:
+                extras.append("nomes destacados em amarelo")
+            if compress:
+                extras.append("PDF comprimido")
+            extra_msg = f"\n({', '.join(extras)})" if extras else ""
             self.after(0, lambda: messagebox.showinfo(
                 "Sucesso",
-                f"PDF pesquisável gerado!\n\n{output_pdf}\n\n"
+                f"PDF pesquisável gerado!\n\n{output_pdf}{extra_msg}\n\n"
                 "Use CTRL+F no seu leitor de PDF para pesquisar."
             ))
         except Exception as e:
@@ -1285,20 +1234,5 @@ class PDFOcrApp(tk.Tk):
 
 
 if __name__ == "__main__":
-    # Verificação de licença antes de abrir o app principal
-    _root = tk.Tk()
-    _root.withdraw()  # Esconde janela vazia
-
-    license_ok = False
-    saved = _load_license()
-    dlg = LicenseDialog(_root, saved_license=saved)
-    _root.wait_window(dlg)
-    license_ok = dlg.result
-
-    _root.destroy()
-
-    if not license_ok:
-        sys.exit(0)
-
     app = PDFOcrApp()
     app.mainloop()
