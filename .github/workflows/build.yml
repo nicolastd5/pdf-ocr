@@ -16,19 +16,69 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install Python dependencies
-        run: |
-          pip install pyinstaller pytesseract pillow pdf2image reportlab PyPDF2
+        run: pip install pyinstaller pytesseract pillow pdf2image reportlab PyPDF2
 
+      # ── Tesseract OCR ────────────────────────────────────────────────────────
+      - name: Download Tesseract installer
+        run: |
+          $url = "https://github.com/UB-Mannheim/tesseract/releases/download/v5.3.3.20231005/tesseract-ocr-w64-setup-5.3.3.20231005.exe"
+          Invoke-WebRequest -Uri $url -OutFile tesseract_installer.exe
+        shell: pwsh
+
+      - name: Install Tesseract silently
+        run: |
+          Start-Process -FilePath "tesseract_installer.exe" -ArgumentList `
+            "/S", `
+            "/COMPONENTS=lang_por,lang_eng", `
+            "/D=C:\Tesseract" `
+            -Wait -NoNewWindow
+        shell: pwsh
+
+      - name: Copy Tesseract to deps/
+        run: |
+          New-Item -ItemType Directory -Path deps\tesseract -Force
+          Copy-Item "C:\Tesseract\tesseract.exe"  deps\tesseract\
+          Copy-Item "C:\Tesseract\*.dll"           deps\tesseract\ -ErrorAction SilentlyContinue
+          Copy-Item "C:\Tesseract\tessdata"         deps\tesseract\ -Recurse
+          # Mantém apenas os modelos necessários para reduzir tamanho
+          Get-ChildItem deps\tesseract\tessdata -File |
+            Where-Object { $_.Name -notmatch "^(por|eng|osd)\.traineddata$" } |
+            Remove-Item
+        shell: pwsh
+
+      # ── Poppler ──────────────────────────────────────────────────────────────
+      - name: Download Poppler
+        run: |
+          $url = "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip"
+          Invoke-WebRequest -Uri $url -OutFile poppler.zip
+          Expand-Archive -Path poppler.zip -DestinationPath poppler_extracted -Force
+        shell: pwsh
+
+      - name: Copy Poppler to deps/
+        run: |
+          New-Item -ItemType Directory -Path deps\poppler\bin -Force
+          $bin = Get-ChildItem -Path poppler_extracted -Recurse -Filter "pdftoppm.exe" |
+                 Select-Object -First 1 -ExpandProperty DirectoryName
+          Copy-Item "$bin\*.exe" deps\poppler\bin\
+          Copy-Item "$bin\*.dll" deps\poppler\bin\ -ErrorAction SilentlyContinue
+        shell: pwsh
+
+      # ── Build EXE ────────────────────────────────────────────────────────────
       - name: Build EXE with PyInstaller
         run: pyinstaller pdf_ocr.spec
 
-      - name: Upload EXE as artifact
+      - name: Verify EXE exists
+        run: Test-Path dist\PDF_OCR.exe
+        shell: pwsh
+
+      # ── Release ──────────────────────────────────────────────────────────────
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: PDF_OCR_Windows
@@ -43,17 +93,12 @@ jobs:
             ## PDF OCR ${{ github.ref_name }}
 
             ### Download
-            Baixe o arquivo `PDF_OCR.exe` abaixo e execute diretamente — sem precisar instalar Python.
+            Baixe o `PDF_OCR.exe` abaixo e execute — **sem instalar nada**.
+            Tesseract OCR e Poppler já estão embutidos no executável.
 
-            ### Requisitos externos (instalar separadamente)
-            - **Tesseract OCR**: https://github.com/UB-Mannheim/tesseract/wiki
-              *(marque o pacote de idioma "Portuguese" durante a instalação)*
-            - **Poppler**: https://github.com/oschwartz10612/poppler-windows/releases
-              *(extraia em `C:\Program Files\poppler\Library\bin`)*
-
-            ### Novidades desta versão
-            - Interface com abas (OCR / Sobre)
-            - Auto-update: verificação automática de novas versões
-            - Botão de atualização manual na aba Sobre
+            ### Novidades
+            - Janela de loading animada (círculo girando) durante o OCR
+            - Tesseract e Poppler embutidos no EXE (sem instalação extra)
+            - Aba Sobre com auto-update e botão de verificação manual
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

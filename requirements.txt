@@ -4,3 +4,5 @@ pdf2image
 reportlab
 PyPDF2
 pyinstaller
+# Tesseract OCR e Poppler são embutidos automaticamente pelo GitHub Actions
+

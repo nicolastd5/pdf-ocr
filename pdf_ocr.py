@@ -1,7 +1,7 @@
 """
-PDF OCR v0.1
+PDF OCR v0.2
 Converte PDFs escaneados em PDFs pesquisáveis com OCR.
-Repositório: https://github.com/nicol/pdf-ocr
+Repositório: https://github.com/nicolastd5/pdf-ocr
 """
 
 import tkinter as tk
@@ -10,6 +10,7 @@ import threading
 import os
 import sys
 import json
+import math
 import webbrowser
 
 try:
@@ -32,7 +33,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.1"
+APP_VERSION = "0.2"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -43,7 +44,26 @@ GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases
 #  Tesseract / Poppler helpers
 # ─────────────────────────────────────────────────────────────
 
+def _bundled_bin(name):
+    """Retorna caminho de binário embutido pelo PyInstaller, ou None."""
+    if not getattr(sys, "frozen", False):
+        return None
+    base = sys._MEIPASS
+    path = os.path.join(base, name)
+    return path if os.path.isfile(path) else None
+
+
 def check_tesseract():
+    # 1. Tenta binário embutido no EXE
+    bundled = _bundled_bin("tesseract.exe")
+    if bundled:
+        pytesseract.pytesseract.tesseract_cmd = bundled
+        # TESSDATA_PREFIX precisa apontar para a pasta com tessdata/
+        tess_dir = os.path.dirname(bundled)
+        os.environ.setdefault("TESSDATA_PREFIX", tess_dir)
+        return True
+
+    # 2. Caminhos comuns de instalação
     common_paths = [
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
         r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
@@ -55,6 +75,8 @@ def check_tesseract():
         if os.path.isfile(path):
             pytesseract.pytesseract.tesseract_cmd = path
             return True
+
+    # 3. PATH do sistema
     try:
         pytesseract.get_tesseract_version()
         return True
@@ -64,8 +86,18 @@ def check_tesseract():
 
 def find_poppler():
     import shutil
+
+    # 1. Binários embutidos no EXE
+    if getattr(sys, "frozen", False):
+        bundled_dir = os.path.join(sys._MEIPASS, "poppler", "bin")
+        if os.path.isdir(bundled_dir):
+            return bundled_dir
+
+    # 2. PATH do sistema
     if shutil.which("pdftoppm"):
         return None
+
+    # 3. Caminhos comuns
     common = [
         r"C:\Program Files\poppler\Library\bin",
         r"C:\Program Files\poppler-24\Library\bin",
@@ -83,7 +115,6 @@ def find_poppler():
 # ─────────────────────────────────────────────────────────────
 
 def fetch_latest_release():
-    """Retorna (tag_str, url_release) ou lança exceção."""
     req = urllib.request.Request(
         GITHUB_RELEASES_API,
         headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"}
@@ -103,6 +134,130 @@ def version_tuple(v):
 
 
 # ─────────────────────────────────────────────────────────────
+#  Spinner (janela de loading com círculo animado)
+# ─────────────────────────────────────────────────────────────
+
+class SpinnerWindow(tk.Toplevel):
+    """Janela modal com círculo animado e texto de status durante o OCR."""
+
+    _ARC_SPAN   = 280        # graus do arco
+    _SPEED      = 6          # graus por frame
+    _INTERVAL   = 16         # ms por frame (~60 fps)
+    _RADIUS     = 48
+    _THICKNESS  = 9
+    _BG         = "#1a1a2e"
+    _FG_ARC     = "#4fc3f7"
+    _FG_TRACK   = "#2e2e4e"
+    _FG_TEXT    = "#ffffff"
+    _FG_SUB     = "#aaaacc"
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("")
+        self.resizable(False, False)
+        self.configure(bg=self._BG)
+        self.overrideredirect(True)          # sem barra de título
+        self.attributes("-topmost", True)
+
+        self._angle   = 0
+        self._running = False
+        self._after_id = None
+
+        self.status_var = tk.StringVar(value="Iniciando OCR...")
+        self.page_var   = tk.StringVar(value="")
+
+        self._build()
+        self._center(parent)
+
+        # torna modal (bloqueia interação com a janela pai)
+        self.grab_set()
+
+    def _build(self):
+        pad = 32
+        size = self._RADIUS * 2 + self._THICKNESS * 2 + 4
+        canvas_size = size + 4
+
+        outer = tk.Frame(self, bg=self._BG, padx=pad, pady=pad)
+        outer.pack()
+
+        # Título da janela
+        tk.Label(outer, text="Processando OCR",
+                 font=("Segoe UI", 13, "bold"),
+                 bg=self._BG, fg=self._FG_TEXT).pack(pady=(0, 18))
+
+        # Canvas com o círculo
+        self._canvas = tk.Canvas(outer, width=canvas_size, height=canvas_size,
+                                 bg=self._BG, highlightthickness=0)
+        self._canvas.pack()
+
+        cx = cy = canvas_size // 2
+        r  = self._RADIUS
+        t  = self._THICKNESS
+
+        # Trilha (arco de fundo)
+        self._canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
+                                 outline=self._FG_TRACK, width=t, tags="track")
+
+        # Arco animado
+        self._arc = self._canvas.create_arc(
+            cx - r, cy - r, cx + r, cy + r,
+            start=90, extent=-self._ARC_SPAN,
+            outline=self._FG_ARC, width=t,
+            style="arc", tags="spinner"
+        )
+
+        # Status text
+        tk.Label(outer, textvariable=self.status_var,
+                 font=("Segoe UI", 10),
+                 bg=self._BG, fg=self._FG_TEXT,
+                 wraplength=260, justify="center").pack(pady=(16, 2))
+
+        tk.Label(outer, textvariable=self.page_var,
+                 font=("Segoe UI", 9),
+                 bg=self._BG, fg=self._FG_SUB).pack()
+
+    def _center(self, parent):
+        self.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        sw = self.winfo_reqwidth()
+        sh = self.winfo_reqheight()
+        x = px + (pw - sw) // 2
+        y = py + (ph - sh) // 2
+        self.geometry(f"+{x}+{y}")
+
+    def start(self):
+        self._running = True
+        self._animate()
+
+    def stop(self):
+        self._running = False
+        if self._after_id:
+            try:
+                self.after_cancel(self._after_id)
+            except Exception:
+                pass
+        self.grab_release()
+        self.destroy()
+
+    def set_status(self, msg):
+        self.status_var.set(msg)
+
+    def set_page(self, current, total):
+        self.page_var.set(f"Página {current} de {total}")
+
+    def _animate(self):
+        if not self._running:
+            return
+        self._angle = (self._angle + self._SPEED) % 360
+        start = 90 - self._angle
+        self._canvas.itemconfigure(self._arc, start=start)
+        self._after_id = self.after(self._INTERVAL, self._animate)
+
+
+# ─────────────────────────────────────────────────────────────
 #  Main App
 # ─────────────────────────────────────────────────────────────
 
@@ -114,12 +269,13 @@ class PDFOcrApp(tk.Tk):
         self.resizable(False, False)
         self.configure(bg="#f5f5f5")
 
-        self.input_path = tk.StringVar()
+        self.input_path  = tk.StringVar()
         self.output_path = tk.StringVar()
-        self.lang = tk.StringVar(value="por")
-        self.status = tk.StringVar(value="Aguardando arquivo...")
+        self.lang        = tk.StringVar(value="por")
+        self.status      = tk.StringVar(value="Aguardando arquivo...")
         self.progress_var = tk.DoubleVar(value=0)
-        self._running = False
+        self._running    = False
+        self._spinner    = None
 
         self._build_ui()
 
@@ -132,10 +288,10 @@ class PDFOcrApp(tk.Tk):
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.tab_ocr = tk.Frame(nb, bg="#f5f5f5")
+        self.tab_ocr   = tk.Frame(nb, bg="#f5f5f5")
         self.tab_about = tk.Frame(nb, bg="#f5f5f5")
 
-        nb.add(self.tab_ocr, text="  OCR  ")
+        nb.add(self.tab_ocr,   text="  OCR  ")
         nb.add(self.tab_about, text="  Sobre  ")
 
         self._build_ocr_tab()
@@ -152,7 +308,6 @@ class PDFOcrApp(tk.Tk):
         tk.Label(f, text="Converte PDF escaneado em PDF com texto pesquisável",
                  font=("Segoe UI", 9), bg="#f5f5f5", fg="#555").pack(pady=(0, 10))
 
-        # Entrada
         frame_in = tk.Frame(f, bg="#f5f5f5")
         frame_in.pack(fill="x", **pad)
         tk.Label(frame_in, text="PDF de entrada:", width=14, anchor="w",
@@ -162,7 +317,6 @@ class PDFOcrApp(tk.Tk):
         tk.Button(frame_in, text="Abrir", command=self._browse_input,
                   width=8).pack(side="left")
 
-        # Saída
         frame_out = tk.Frame(f, bg="#f5f5f5")
         frame_out.pack(fill="x", **pad)
         tk.Label(frame_out, text="PDF de saída:", width=14, anchor="w",
@@ -172,7 +326,6 @@ class PDFOcrApp(tk.Tk):
         tk.Button(frame_out, text="Salvar", command=self._browse_output,
                   width=8).pack(side="left")
 
-        # Idioma
         frame_lang = tk.Frame(f, bg="#f5f5f5")
         frame_lang.pack(fill="x", **pad)
         tk.Label(frame_lang, text="Idioma OCR:", width=14, anchor="w",
@@ -191,14 +344,12 @@ class PDFOcrApp(tk.Tk):
         lang_combo.pack(side="left")
         lang_combo.bind("<<ComboboxSelected>>", self._on_lang_select)
 
-        # Status / Progress
         tk.Label(f, textvariable=self.status, font=("Segoe UI", 9),
                  bg="#f5f5f5", fg="#444").pack(pady=(14, 2))
         self.pb = ttk.Progressbar(f, variable=self.progress_var,
                                   maximum=100, length=580)
         self.pb.pack(padx=16)
 
-        # Botões
         frame_btn = tk.Frame(f, bg="#f5f5f5")
         frame_btn.pack(pady=14)
         self.btn_run = tk.Button(
@@ -238,23 +389,19 @@ class PDFOcrApp(tk.Tk):
 
         ttk.Separator(f, orient="horizontal").pack(fill="x", padx=40, pady=18)
 
-        # Auto-update toggle
         self.auto_update_var = tk.BooleanVar(value=True)
-        chk = tk.Checkbutton(
+        tk.Checkbutton(
             f,
             text="Verificar atualizações automaticamente ao iniciar",
             variable=self.auto_update_var,
             bg="#f5f5f5", font=("Segoe UI", 9),
             command=self._save_prefs
-        )
-        chk.pack()
+        ).pack()
 
-        # Status update
         self.update_status = tk.StringVar(value="")
         tk.Label(f, textvariable=self.update_status,
                  font=("Segoe UI", 9), bg="#f5f5f5", fg="#555").pack(pady=(6, 0))
 
-        # Botão Update
         self.btn_update = tk.Button(
             f, text="🔄  Verificar Atualização",
             font=("Segoe UI", 10),
@@ -270,7 +417,6 @@ class PDFOcrApp(tk.Tk):
                  font=("Segoe UI", 8), bg="#f5f5f5", fg="#aaa").pack(
             side="bottom", pady=12)
 
-        # Verificação automática ao iniciar
         self.after(1500, self._auto_update_check)
 
     # ── Prefs ─────────────────────────────────────────────────
@@ -313,7 +459,7 @@ class PDFOcrApp(tk.Tk):
         try:
             latest, url = fetch_latest_release()
             current = version_tuple(APP_VERSION)
-            remote = version_tuple(latest)
+            remote  = version_tuple(latest)
 
             if remote > current:
                 msg = f"Nova versão disponível: v{latest}"
@@ -324,28 +470,22 @@ class PDFOcrApp(tk.Tk):
                     self.after(0, lambda: self._notify_update(latest, url))
             else:
                 msg = f"Você está na versão mais recente (v{APP_VERSION})"
+                self.after(0, lambda: self.update_status.set(msg))
                 if manual:
-                    self.after(0, lambda: self.update_status.set(msg))
-                    self.after(0, lambda: messagebox.showinfo(
-                        "Atualização", msg))
-                else:
-                    self.after(0, lambda: self.update_status.set(msg))
+                    self.after(0, lambda: messagebox.showinfo("Atualização", msg))
         except Exception as e:
             msg = f"Não foi possível verificar: {e}"
+            self.after(0, lambda: self.update_status.set(msg))
             if manual:
-                self.after(0, lambda: self.update_status.set(msg))
                 self.after(0, lambda: messagebox.showwarning(
                     "Verificação de atualização", msg))
-            else:
-                self.after(0, lambda: self.update_status.set(msg))
         finally:
             self.after(0, lambda: self.btn_update.config(state="normal"))
 
     def _prompt_update(self, latest, url):
         if messagebox.askyesno(
             "Atualização disponível",
-            f"Nova versão v{latest} disponível!\n\n"
-            "Deseja abrir a página de download?"
+            f"Nova versão v{latest} disponível!\n\nDeseja abrir a página de download?"
         ):
             webbrowser.open(url)
 
@@ -405,8 +545,14 @@ class PDFOcrApp(tk.Tk):
             return
         if self._running:
             return
+
         self._running = True
         self.btn_run.config(state="disabled")
+
+        # Abre o spinner
+        self._spinner = SpinnerWindow(self)
+        self._spinner.start()
+
         lang_raw = self.lang.get()
         lang = lang_raw.split(" — ")[0] if " — " in lang_raw else lang_raw
         threading.Thread(
@@ -419,7 +565,7 @@ class PDFOcrApp(tk.Tk):
 
     def _run_ocr(self, input_pdf, output_pdf, lang):
         try:
-            self._set_status("Convertendo páginas para imagem...")
+            self._spinner_status("Convertendo páginas para imagem...")
             poppler_path = find_poppler()
             pages = convert_from_path(input_pdf, dpi=300,
                                       poppler_path=poppler_path)
@@ -427,7 +573,10 @@ class PDFOcrApp(tk.Tk):
             page_buffers = []
 
             for i, pil_img in enumerate(pages, 1):
+                self._spinner_status(f"Aplicando OCR...")
+                self._spinner_page(i, total)
                 self._set_status(f"OCR página {i} / {total}...")
+
                 ocr_data = pytesseract.image_to_data(
                     pil_img, lang=lang,
                     output_type=pytesseract.Output.DICT
@@ -438,6 +587,7 @@ class PDFOcrApp(tk.Tk):
                 img_reader = ImageReader(pil_img)
                 c.drawImage(img_reader, 0, 0, width=img_w, height=img_h)
                 c.setFillColorRGB(0, 0, 0, alpha=0)
+
                 for j in range(len(ocr_data["text"])):
                     word = ocr_data["text"][j]
                     conf = int(ocr_data["conf"][j])
@@ -461,10 +611,12 @@ class PDFOcrApp(tk.Tk):
                         c.restoreState()
                     except Exception:
                         pass
+
                 c.save()
                 page_buffers.append(buf.getvalue())
                 self.progress_var.set(i / total * 95)
 
+            self._spinner_status("Gerando PDF final...")
             self._set_status("Gerando PDF final...")
             merger = PyPDF2.PdfWriter()
             for pb in page_buffers:
@@ -474,20 +626,36 @@ class PDFOcrApp(tk.Tk):
                 merger.write(f)
 
             self.progress_var.set(100)
-            self._set_status(
-                f"Concluído! Salvo em: {os.path.basename(output_pdf)}")
+            self._set_status(f"Concluído! Salvo em: {os.path.basename(output_pdf)}")
+            self.after(0, self._close_spinner)
             self.after(0, lambda: messagebox.showinfo(
                 "Sucesso",
                 f"PDF pesquisável gerado com sucesso!\n\n{output_pdf}\n\n"
                 "Use CTRL+F no seu leitor de PDF para pesquisar."
             ))
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror(
-                "Erro durante OCR", str(e)))
+            self.after(0, self._close_spinner)
+            self.after(0, lambda: messagebox.showerror("Erro durante OCR", str(e)))
             self._set_status(f"Erro: {e}")
         finally:
             self._running = False
             self.after(0, lambda: self.btn_run.config(state="normal"))
+
+    def _spinner_status(self, msg):
+        if self._spinner:
+            self.after(0, lambda: self._spinner.set_status(msg))
+
+    def _spinner_page(self, current, total):
+        if self._spinner:
+            self.after(0, lambda: self._spinner.set_page(current, total))
+
+    def _close_spinner(self):
+        if self._spinner:
+            try:
+                self._spinner.stop()
+            except Exception:
+                pass
+            self._spinner = None
 
     def _set_status(self, msg):
         self.after(0, lambda: self.status.set(msg))
