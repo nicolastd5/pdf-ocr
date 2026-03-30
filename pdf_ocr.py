@@ -1,5 +1,5 @@
 """
-PDF OCR v0.2
+PDF OCR v0.3
 Converte PDFs escaneados em PDFs pesquisáveis com OCR.
 Repositório: https://github.com/nicolastd5/pdf-ocr
 """
@@ -10,15 +10,12 @@ import threading
 import os
 import sys
 import json
-import math
 import webbrowser
-
-try:
-    import urllib.request
-    import urllib.error
-    URLLIB_OK = True
-except ImportError:
-    URLLIB_OK = False
+import urllib.request
+import urllib.error
+import tempfile
+import subprocess
+import shutil
 
 try:
     import pytesseract
@@ -33,7 +30,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.2"
+APP_VERSION = "0.3"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -45,25 +42,18 @@ GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases
 # ─────────────────────────────────────────────────────────────
 
 def _bundled_bin(name):
-    """Retorna caminho de binário embutido pelo PyInstaller, ou None."""
     if not getattr(sys, "frozen", False):
         return None
-    base = sys._MEIPASS
-    path = os.path.join(base, name)
+    path = os.path.join(sys._MEIPASS, name)
     return path if os.path.isfile(path) else None
 
 
 def check_tesseract():
-    # 1. Tenta binário embutido no EXE
     bundled = _bundled_bin("tesseract.exe")
     if bundled:
         pytesseract.pytesseract.tesseract_cmd = bundled
-        # TESSDATA_PREFIX precisa apontar para a pasta com tessdata/
-        tess_dir = os.path.dirname(bundled)
-        os.environ.setdefault("TESSDATA_PREFIX", tess_dir)
+        os.environ.setdefault("TESSDATA_PREFIX", os.path.dirname(bundled))
         return True
-
-    # 2. Caminhos comuns de instalação
     common_paths = [
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
         r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
@@ -75,8 +65,6 @@ def check_tesseract():
         if os.path.isfile(path):
             pytesseract.pytesseract.tesseract_cmd = path
             return True
-
-    # 3. PATH do sistema
     try:
         pytesseract.get_tesseract_version()
         return True
@@ -85,147 +73,118 @@ def check_tesseract():
 
 
 def find_poppler():
-    import shutil
-
-    # 1. Binários embutidos no EXE
     if getattr(sys, "frozen", False):
         bundled_dir = os.path.join(sys._MEIPASS, "poppler", "bin")
         if os.path.isdir(bundled_dir):
             return bundled_dir
-
-    # 2. PATH do sistema
     if shutil.which("pdftoppm"):
         return None
-
-    # 3. Caminhos comuns
-    common = [
+    for p in [
         r"C:\Program Files\poppler\Library\bin",
         r"C:\Program Files\poppler-24\Library\bin",
         r"C:\poppler\bin",
         r"C:\poppler\Library\bin",
-    ]
-    for p in common:
+    ]:
         if os.path.isdir(p):
             return p
     return None
 
 
 # ─────────────────────────────────────────────────────────────
-#  Update checker
+#  Update helpers
 # ─────────────────────────────────────────────────────────────
-
-def fetch_latest_release():
-    req = urllib.request.Request(
-        GITHUB_RELEASES_API,
-        headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"}
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read().decode())
-    tag = data.get("tag_name", "").lstrip("v")
-    url = data.get("html_url", GITHUB_RELEASES_PAGE)
-    return tag, url
-
 
 def version_tuple(v):
     try:
-        return tuple(int(x) for x in v.split("."))
+        return tuple(int(x) for x in str(v).split("."))
     except Exception:
         return (0,)
 
 
+def fetch_latest_release():
+    """Retorna dict com tag, body (changelog) e download_url do .exe."""
+    req = urllib.request.Request(
+        GITHUB_RELEASES_API,
+        headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"}
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read().decode())
+
+    tag = data.get("tag_name", "").lstrip("v")
+    body = data.get("body", "Sem notas de versão.").strip()
+    html_url = data.get("html_url", GITHUB_RELEASES_PAGE)
+
+    # Procura o asset .exe
+    exe_url = None
+    for asset in data.get("assets", []):
+        if asset["name"].lower().endswith(".exe"):
+            exe_url = asset["browser_download_url"]
+            break
+
+    return {"tag": tag, "body": body, "exe_url": exe_url, "html_url": html_url}
+
+
 # ─────────────────────────────────────────────────────────────
-#  Spinner (janela de loading com círculo animado)
+#  Spinner
 # ─────────────────────────────────────────────────────────────
 
 class SpinnerWindow(tk.Toplevel):
-    """Janela modal com círculo animado e texto de status durante o OCR."""
-
-    _ARC_SPAN   = 280        # graus do arco
-    _SPEED      = 6          # graus por frame
-    _INTERVAL   = 16         # ms por frame (~60 fps)
-    _RADIUS     = 48
-    _THICKNESS  = 9
-    _BG         = "#1a1a2e"
-    _FG_ARC     = "#4fc3f7"
-    _FG_TRACK   = "#2e2e4e"
-    _FG_TEXT    = "#ffffff"
-    _FG_SUB     = "#aaaacc"
+    _ARC_SPAN = 280
+    _SPEED    = 6
+    _INTERVAL = 16
+    _RADIUS   = 48
+    _THICKNESS = 9
+    _BG       = "#1a1a2e"
+    _FG_ARC   = "#4fc3f7"
+    _FG_TRACK = "#2e2e4e"
+    _FG_TEXT  = "#ffffff"
+    _FG_SUB   = "#aaaacc"
 
     def __init__(self, parent):
         super().__init__(parent)
         self.title("")
         self.resizable(False, False)
         self.configure(bg=self._BG)
-        self.overrideredirect(True)          # sem barra de título
+        self.overrideredirect(True)
         self.attributes("-topmost", True)
-
-        self._angle   = 0
-        self._running = False
+        self._angle    = 0
+        self._running  = False
         self._after_id = None
-
         self.status_var = tk.StringVar(value="Iniciando OCR...")
         self.page_var   = tk.StringVar(value="")
-
         self._build()
         self._center(parent)
-
-        # torna modal (bloqueia interação com a janela pai)
         self.grab_set()
 
     def _build(self):
-        pad = 32
-        size = self._RADIUS * 2 + self._THICKNESS * 2 + 4
-        canvas_size = size + 4
-
-        outer = tk.Frame(self, bg=self._BG, padx=pad, pady=pad)
+        outer = tk.Frame(self, bg=self._BG, padx=32, pady=32)
         outer.pack()
-
-        # Título da janela
         tk.Label(outer, text="Processando OCR",
                  font=("Segoe UI", 13, "bold"),
                  bg=self._BG, fg=self._FG_TEXT).pack(pady=(0, 18))
-
-        # Canvas com o círculo
-        self._canvas = tk.Canvas(outer, width=canvas_size, height=canvas_size,
+        size = self._RADIUS * 2 + self._THICKNESS * 2 + 4
+        self._canvas = tk.Canvas(outer, width=size, height=size,
                                  bg=self._BG, highlightthickness=0)
         self._canvas.pack()
-
-        cx = cy = canvas_size // 2
-        r  = self._RADIUS
-        t  = self._THICKNESS
-
-        # Trilha (arco de fundo)
-        self._canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
-                                 outline=self._FG_TRACK, width=t, tags="track")
-
-        # Arco animado
+        cx = cy = size // 2
+        r, t = self._RADIUS, self._THICKNESS
+        self._canvas.create_oval(cx-r, cy-r, cx+r, cy+r,
+                                 outline=self._FG_TRACK, width=t)
         self._arc = self._canvas.create_arc(
-            cx - r, cy - r, cx + r, cy + r,
+            cx-r, cy-r, cx+r, cy+r,
             start=90, extent=-self._ARC_SPAN,
-            outline=self._FG_ARC, width=t,
-            style="arc", tags="spinner"
+            outline=self._FG_ARC, width=t, style="arc"
         )
-
-        # Status text
         tk.Label(outer, textvariable=self.status_var,
-                 font=("Segoe UI", 10),
-                 bg=self._BG, fg=self._FG_TEXT,
+                 font=("Segoe UI", 10), bg=self._BG, fg=self._FG_TEXT,
                  wraplength=260, justify="center").pack(pady=(16, 2))
-
         tk.Label(outer, textvariable=self.page_var,
-                 font=("Segoe UI", 9),
-                 bg=self._BG, fg=self._FG_SUB).pack()
+                 font=("Segoe UI", 9), bg=self._BG, fg=self._FG_SUB).pack()
 
     def _center(self, parent):
         self.update_idletasks()
-        pw = parent.winfo_width()
-        ph = parent.winfo_height()
-        px = parent.winfo_rootx()
-        py = parent.winfo_rooty()
-        sw = self.winfo_reqwidth()
-        sh = self.winfo_reqheight()
-        x = px + (pw - sw) // 2
-        y = py + (ph - sh) // 2
+        x = parent.winfo_rootx() + (parent.winfo_width()  - self.winfo_reqwidth())  // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_reqheight()) // 2
         self.geometry(f"+{x}+{y}")
 
     def start(self):
@@ -252,9 +211,205 @@ class SpinnerWindow(tk.Toplevel):
         if not self._running:
             return
         self._angle = (self._angle + self._SPEED) % 360
-        start = 90 - self._angle
-        self._canvas.itemconfigure(self._arc, start=start)
+        self._canvas.itemconfigure(self._arc, start=90 - self._angle)
         self._after_id = self.after(self._INTERVAL, self._animate)
+
+
+# ─────────────────────────────────────────────────────────────
+#  Update Dialog  (changelog + download automático)
+# ─────────────────────────────────────────────────────────────
+
+class UpdateDialog(tk.Toplevel):
+    """Janela que mostra changelog e baixa + aplica o update automaticamente."""
+
+    _BG      = "#1a1a2e"
+    _BG2     = "#14142a"
+    _FG      = "#ffffff"
+    _FG_SUB  = "#aaaacc"
+    _ACCENT  = "#4fc3f7"
+    _BTN_BG  = "#4fc3f7"
+    _BTN_FG  = "#1a1a2e"
+
+    def __init__(self, parent, release_info):
+        super().__init__(parent)
+        self._info    = release_info
+        self._parent  = parent
+        self.title("Atualização disponível")
+        self.resizable(False, False)
+        self.configure(bg=self._BG)
+        self.attributes("-topmost", True)
+        self._build()
+        self._center(parent)
+        self.grab_set()
+
+    def _build(self):
+        tag  = self._info["tag"]
+        body = self._info["body"]
+
+        # Cabeçalho
+        hdr = tk.Frame(self, bg=self._BG, padx=28, pady=20)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="Nova versão disponível!",
+                 font=("Segoe UI", 14, "bold"),
+                 bg=self._BG, fg=self._FG).pack(anchor="w")
+        tk.Label(hdr, text=f"v{APP_VERSION}  →  v{tag}",
+                 font=("Segoe UI", 10), bg=self._BG, fg=self._ACCENT).pack(anchor="w", pady=(2, 0))
+
+        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=0)
+
+        # Changelog
+        body_frame = tk.Frame(self, bg=self._BG2, padx=20, pady=14)
+        body_frame.pack(fill="both", expand=True, padx=0)
+        tk.Label(body_frame, text="O que há de novo:",
+                 font=("Segoe UI", 9, "bold"),
+                 bg=self._BG2, fg=self._FG_SUB).pack(anchor="w", pady=(0, 6))
+
+        txt = tk.Text(body_frame, height=10, width=52,
+                      bg=self._BG2, fg=self._FG,
+                      relief="flat", font=("Segoe UI", 9),
+                      wrap="word", state="normal",
+                      highlightthickness=0, bd=0)
+        txt.insert("1.0", body)
+        txt.config(state="disabled")
+        sb = ttk.Scrollbar(body_frame, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=sb.set)
+        txt.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        ttk.Separator(self, orient="horizontal").pack(fill="x")
+
+        # Progresso (oculto até o download iniciar)
+        self._prog_frame = tk.Frame(self, bg=self._BG, padx=28, pady=8)
+        self._prog_frame.pack(fill="x")
+        self._prog_label = tk.Label(self._prog_frame, text="",
+                                    font=("Segoe UI", 8),
+                                    bg=self._BG, fg=self._FG_SUB)
+        self._prog_label.pack(anchor="w")
+        self._prog_bar = ttk.Progressbar(self._prog_frame, length=400,
+                                         mode="determinate", maximum=100)
+        self._prog_bar.pack(fill="x", pady=(2, 0))
+        self._prog_frame.pack_forget()   # escondido por padrão
+
+        # Botões
+        btn_row = tk.Frame(self, bg=self._BG, padx=28, pady=16)
+        btn_row.pack(fill="x")
+        self._btn_update = tk.Button(
+            btn_row,
+            text="Sim, atualizar agora",
+            font=("Segoe UI", 10, "bold"),
+            bg=self._BTN_BG, fg=self._BTN_FG,
+            activebackground="#81d4fa", activeforeground=self._BTN_FG,
+            relief="flat", padx=16, pady=8,
+            command=self._start_download
+        )
+        self._btn_update.pack(side="left", padx=(0, 10))
+        tk.Button(
+            btn_row, text="Agora não",
+            font=("Segoe UI", 10), bg=self._BG, fg=self._FG_SUB,
+            activebackground="#2e2e4e", activeforeground=self._FG,
+            relief="flat", padx=12, pady=8,
+            command=self.destroy
+        ).pack(side="left")
+
+        self._center(self._parent)
+
+    def _center(self, parent):
+        self.update_idletasks()
+        x = parent.winfo_rootx() + (parent.winfo_width()  - self.winfo_reqwidth())  // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_reqheight()) // 2
+        self.geometry(f"+{x}+{y}")
+
+    # ── Download + aplicação ──────────────────────────────────
+
+    def _start_download(self):
+        exe_url = self._info.get("exe_url")
+        if not exe_url:
+            messagebox.showwarning(
+                "Sem executável",
+                "Esta release não possui um .exe para download.\n\n"
+                "Acesse manualmente:\n" + self._info.get("html_url", GITHUB_RELEASES_PAGE),
+                parent=self
+            )
+            return
+
+        self._btn_update.config(state="disabled", text="Baixando...")
+        self._prog_frame.pack(fill="x", padx=28, pady=(0, 4))
+        threading.Thread(target=self._download_and_apply,
+                         args=(exe_url,), daemon=True).start()
+
+    def _download_and_apply(self, url):
+        try:
+            # Baixa para temp
+            tmp_dir  = tempfile.mkdtemp(prefix="pdfocr_update_")
+            tmp_exe  = os.path.join(tmp_dir, "PDF_OCR_new.exe")
+
+            req = urllib.request.Request(url, headers={"User-Agent": f"pdf-ocr/{APP_VERSION}"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                total = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                chunk = 65536
+                with open(tmp_exe, "wb") as f:
+                    while True:
+                        data = resp.read(chunk)
+                        if not data:
+                            break
+                        f.write(data)
+                        downloaded += len(data)
+                        if total > 0:
+                            pct = downloaded / total * 100
+                            mb_done  = downloaded / 1_048_576
+                            mb_total = total      / 1_048_576
+                            self.after(0, lambda p=pct, d=mb_done, t=mb_total:
+                                       self._update_progress(p, d, t))
+
+            self.after(0, lambda: self._apply_update(tmp_exe))
+
+        except Exception as e:
+            self.after(0, lambda: self._download_failed(str(e)))
+
+    def _update_progress(self, pct, mb_done, mb_total):
+        self._prog_bar["value"] = pct
+        self._prog_label.config(
+            text=f"Baixando... {mb_done:.1f} MB / {mb_total:.1f} MB  ({pct:.0f}%)"
+        )
+
+    def _apply_update(self, new_exe):
+        """Substitui o executável atual e reinicia."""
+        current_exe = sys.executable if getattr(sys, "frozen", False) else None
+
+        if current_exe and os.path.isfile(current_exe):
+            # Cria script .bat que: espera o processo atual fechar, copia o novo exe e reinicia
+            bat_path = os.path.join(tempfile.gettempdir(), "pdfocr_update.bat")
+            with open(bat_path, "w") as f:
+                f.write(f"""@echo off
+ping 127.0.0.1 -n 3 > nul
+copy /Y "{new_exe}" "{current_exe}"
+start "" "{current_exe}"
+del "%~f0"
+""")
+            self._prog_label.config(text="Instalando atualização...")
+            self.after(400, lambda: self._launch_bat_and_quit(bat_path))
+        else:
+            # Modo dev: apenas abre a pasta com o novo exe
+            self._prog_label.config(text="Download concluído!")
+            self.after(0, lambda: messagebox.showinfo(
+                "Download concluído",
+                f"Novo executável salvo em:\n{new_exe}\n\n"
+                "Substitua manualmente o arquivo atual.",
+                parent=self
+            ))
+
+    def _launch_bat_and_quit(self, bat_path):
+        subprocess.Popen(["cmd", "/c", bat_path],
+                         creationflags=subprocess.CREATE_NO_WINDOW,
+                         close_fds=True)
+        self._parent.quit()
+        self._parent.destroy()
+
+    def _download_failed(self, msg):
+        self._btn_update.config(state="normal", text="Sim, atualizar agora")
+        self._prog_label.config(text=f"Erro: {msg}")
+        messagebox.showerror("Falha no download", msg, parent=self)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -269,13 +424,13 @@ class PDFOcrApp(tk.Tk):
         self.resizable(False, False)
         self.configure(bg="#f5f5f5")
 
-        self.input_path  = tk.StringVar()
-        self.output_path = tk.StringVar()
-        self.lang        = tk.StringVar(value="por")
-        self.status      = tk.StringVar(value="Aguardando arquivo...")
+        self.input_path   = tk.StringVar()
+        self.output_path  = tk.StringVar()
+        self.lang         = tk.StringVar(value="por")
+        self.status       = tk.StringVar(value="Aguardando arquivo...")
         self.progress_var = tk.DoubleVar(value=0)
-        self._running    = False
-        self._spinner    = None
+        self._running     = False
+        self._spinner     = None
 
         self._build_ui()
 
@@ -287,13 +442,10 @@ class PDFOcrApp(tk.Tk):
     def _build_ui(self):
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=10, pady=10)
-
         self.tab_ocr   = tk.Frame(nb, bg="#f5f5f5")
         self.tab_about = tk.Frame(nb, bg="#f5f5f5")
-
         nb.add(self.tab_ocr,   text="  OCR  ")
         nb.add(self.tab_about, text="  Sobre  ")
-
         self._build_ocr_tab()
         self._build_about_tab()
 
@@ -457,17 +609,14 @@ class PDFOcrApp(tk.Tk):
 
     def _do_check_update(self, manual):
         try:
-            latest, url = fetch_latest_release()
+            info    = fetch_latest_release()
             current = version_tuple(APP_VERSION)
-            remote  = version_tuple(latest)
+            remote  = version_tuple(info["tag"])
 
             if remote > current:
-                msg = f"Nova versão disponível: v{latest}"
-                self.after(0, lambda: self.update_status.set(msg))
-                if manual:
-                    self.after(0, lambda: self._prompt_update(latest, url))
-                else:
-                    self.after(0, lambda: self._notify_update(latest, url))
+                self.after(0, lambda: self.update_status.set(
+                    f"Nova versão v{info['tag']} disponível!"))
+                self.after(0, lambda: UpdateDialog(self, info))
             else:
                 msg = f"Você está na versão mais recente (v{APP_VERSION})"
                 self.after(0, lambda: self.update_status.set(msg))
@@ -482,17 +631,6 @@ class PDFOcrApp(tk.Tk):
         finally:
             self.after(0, lambda: self.btn_update.config(state="normal"))
 
-    def _prompt_update(self, latest, url):
-        if messagebox.askyesno(
-            "Atualização disponível",
-            f"Nova versão v{latest} disponível!\n\nDeseja abrir a página de download?"
-        ):
-            webbrowser.open(url)
-
-    def _notify_update(self, latest, url):
-        self.update_status.set(
-            f"⬆ Nova versão v{latest} disponível! Acesse a aba Sobre.")
-
     # ── OCR eventos ───────────────────────────────────────────
 
     def _on_lang_select(self, _event):
@@ -506,8 +644,7 @@ class PDFOcrApp(tk.Tk):
         )
         if path:
             self.input_path.set(path)
-            stem = os.path.splitext(path)[0]
-            self.output_path.set(stem + "_pesquisavel.pdf")
+            self.output_path.set(os.path.splitext(path)[0] + "_pesquisavel.pdf")
 
     def _browse_output(self):
         path = filedialog.asksaveasfilename(
@@ -539,8 +676,7 @@ class PDFOcrApp(tk.Tk):
                 "Tesseract não encontrado",
                 "O Tesseract OCR não foi encontrado.\n\n"
                 "Baixe e instale em:\n"
-                "https://github.com/UB-Mannheim/tesseract/wiki\n\n"
-                "Após instalar, reinicie o programa."
+                "https://github.com/UB-Mannheim/tesseract/wiki"
             )
             return
         if self._running:
@@ -548,8 +684,6 @@ class PDFOcrApp(tk.Tk):
 
         self._running = True
         self.btn_run.config(state="disabled")
-
-        # Abre o spinner
         self._spinner = SpinnerWindow(self)
         self._spinner.start()
 
@@ -567,25 +701,21 @@ class PDFOcrApp(tk.Tk):
         try:
             self._spinner_status("Convertendo páginas para imagem...")
             poppler_path = find_poppler()
-            pages = convert_from_path(input_pdf, dpi=300,
-                                      poppler_path=poppler_path)
+            pages = convert_from_path(input_pdf, dpi=300, poppler_path=poppler_path)
             total = len(pages)
             page_buffers = []
 
             for i, pil_img in enumerate(pages, 1):
-                self._spinner_status(f"Aplicando OCR...")
+                self._spinner_status("Aplicando OCR...")
                 self._spinner_page(i, total)
                 self._set_status(f"OCR página {i} / {total}...")
 
                 ocr_data = pytesseract.image_to_data(
-                    pil_img, lang=lang,
-                    output_type=pytesseract.Output.DICT
-                )
+                    pil_img, lang=lang, output_type=pytesseract.Output.DICT)
                 img_w, img_h = pil_img.size
                 buf = io.BytesIO()
                 c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
-                img_reader = ImageReader(pil_img)
-                c.drawImage(img_reader, 0, 0, width=img_w, height=img_h)
+                c.drawImage(ImageReader(pil_img), 0, 0, width=img_w, height=img_h)
                 c.setFillColorRGB(0, 0, 0, alpha=0)
 
                 for j in range(len(ocr_data["text"])):
@@ -593,20 +723,17 @@ class PDFOcrApp(tk.Tk):
                     conf = int(ocr_data["conf"][j])
                     if not word.strip() or conf < 0:
                         continue
-                    x = ocr_data["left"][j]
-                    y = ocr_data["top"][j]
-                    w = ocr_data["width"][j]
-                    h = ocr_data["height"][j]
+                    x, y = ocr_data["left"][j], ocr_data["top"][j]
+                    w, h = ocr_data["width"][j], ocr_data["height"][j]
                     if h <= 0 or w <= 0:
                         continue
-                    pdf_y = img_h - y - h
                     font_size = max(h * 0.85, 1)
                     try:
                         c.setFont("Helvetica", font_size)
-                        text_w = c.stringWidth(word, "Helvetica", font_size)
-                        scale_x = w / text_w if text_w > 0 else 1
+                        tw = c.stringWidth(word, "Helvetica", font_size)
+                        sx = w / tw if tw > 0 else 1
                         c.saveState()
-                        c.transform(scale_x, 0, 0, 1, x, pdf_y)
+                        c.transform(sx, 0, 0, 1, x, img_h - y - h)
                         c.drawString(0, 0, word)
                         c.restoreState()
                     except Exception:
@@ -620,17 +747,16 @@ class PDFOcrApp(tk.Tk):
             self._set_status("Gerando PDF final...")
             merger = PyPDF2.PdfWriter()
             for pb in page_buffers:
-                reader = PyPDF2.PdfReader(io.BytesIO(pb))
-                merger.add_page(reader.pages[0])
+                merger.add_page(PyPDF2.PdfReader(io.BytesIO(pb)).pages[0])
             with open(output_pdf, "wb") as f:
                 merger.write(f)
 
             self.progress_var.set(100)
-            self._set_status(f"Concluído! Salvo em: {os.path.basename(output_pdf)}")
+            self._set_status(f"Concluído! {os.path.basename(output_pdf)}")
             self.after(0, self._close_spinner)
             self.after(0, lambda: messagebox.showinfo(
                 "Sucesso",
-                f"PDF pesquisável gerado com sucesso!\n\n{output_pdf}\n\n"
+                f"PDF pesquisável gerado!\n\n{output_pdf}\n\n"
                 "Use CTRL+F no seu leitor de PDF para pesquisar."
             ))
         except Exception as e:
@@ -664,11 +790,7 @@ class PDFOcrApp(tk.Tk):
         messagebox.showerror(
             "Dependências faltando",
             f"Biblioteca não instalada: {MISSING_DEP}\n\n"
-            "Execute:\n"
-            "pip install pytesseract pillow pdf2image reportlab PyPDF2\n\n"
-            "Também instale:\n"
-            "• Tesseract OCR: https://github.com/UB-Mannheim/tesseract/wiki\n"
-            "• Poppler: https://github.com/oschwartz10612/poppler-windows/releases"
+            "Execute:\npip install pytesseract pillow pdf2image reportlab PyPDF2"
         )
 
 

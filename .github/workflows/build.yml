@@ -26,56 +26,61 @@ jobs:
 
       # ── Tesseract OCR ────────────────────────────────────────────────────────
       - name: Download Tesseract installer
-        run: |
-          $url = "https://github.com/UB-Mannheim/tesseract/releases/download/v5.3.3.20231005/tesseract-ocr-w64-setup-5.3.3.20231005.exe"
-          Invoke-WebRequest -Uri $url -OutFile tesseract_installer.exe
         shell: pwsh
+        run: |
+          $url = "https://github.com/UB-Mannheim/tesseract/releases/download/v5.4.0.20240606/tesseract-ocr-w64-setup-5.4.0.20240606.exe"
+          Invoke-WebRequest -Uri $url -OutFile tesseract_installer.exe -UseBasicParsing
 
       - name: Install Tesseract silently
-        run: |
-          Start-Process -FilePath "tesseract_installer.exe" -ArgumentList `
-            "/S", `
-            "/COMPONENTS=lang_por,lang_eng", `
-            "/D=C:\Tesseract" `
-            -Wait -NoNewWindow
         shell: pwsh
+        run: |
+          Start-Process -FilePath ".\tesseract_installer.exe" `
+            -ArgumentList "/S", "/COMPONENTS=lang_por,lang_eng", "/D=C:\Tesseract" `
+            -Wait -NoNewWindow
+          Start-Sleep -Seconds 5
 
       - name: Copy Tesseract to deps/
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Path deps\tesseract -Force
-          Copy-Item "C:\Tesseract\tesseract.exe"  deps\tesseract\
-          Copy-Item "C:\Tesseract\*.dll"           deps\tesseract\ -ErrorAction SilentlyContinue
-          Copy-Item "C:\Tesseract\tessdata"         deps\tesseract\ -Recurse
-          # Mantém apenas os modelos necessários para reduzir tamanho
+          Copy-Item "C:\Tesseract\tesseract.exe" deps\tesseract\
+          Get-ChildItem "C:\Tesseract\*.dll" | Copy-Item -Destination deps\tesseract\ -ErrorAction SilentlyContinue
+          Copy-Item "C:\Tesseract\tessdata" deps\tesseract\ -Recurse
+          # Mantém apenas os modelos necessários
           Get-ChildItem deps\tesseract\tessdata -File |
             Where-Object { $_.Name -notmatch "^(por|eng|osd)\.traineddata$" } |
-            Remove-Item
-        shell: pwsh
+            Remove-Item -Force
 
       # ── Poppler ──────────────────────────────────────────────────────────────
-      - name: Download Poppler
+      - name: Download and extract Poppler
+        shell: pwsh
         run: |
           $url = "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip"
-          Invoke-WebRequest -Uri $url -OutFile poppler.zip
+          Invoke-WebRequest -Uri $url -OutFile poppler.zip -UseBasicParsing
           Expand-Archive -Path poppler.zip -DestinationPath poppler_extracted -Force
-        shell: pwsh
 
       - name: Copy Poppler to deps/
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Path deps\poppler\bin -Force
-          $bin = Get-ChildItem -Path poppler_extracted -Recurse -Filter "pdftoppm.exe" |
-                 Select-Object -First 1 -ExpandProperty DirectoryName
-          Copy-Item "$bin\*.exe" deps\poppler\bin\
-          Copy-Item "$bin\*.dll" deps\poppler\bin\ -ErrorAction SilentlyContinue
-        shell: pwsh
+          $binDir = Get-ChildItem -Path poppler_extracted -Recurse -Filter "pdftoppm.exe" |
+                    Select-Object -First 1 -ExpandProperty DirectoryName
+          Get-ChildItem "$binDir\*.exe" | Copy-Item -Destination deps\poppler\bin\
+          Get-ChildItem "$binDir\*.dll" | Copy-Item -Destination deps\poppler\bin\ -ErrorAction SilentlyContinue
 
       # ── Build EXE ────────────────────────────────────────────────────────────
       - name: Build EXE with PyInstaller
         run: pyinstaller pdf_ocr.spec
 
-      - name: Verify EXE exists
-        run: Test-Path dist\PDF_OCR.exe
+      - name: Verify EXE was created
         shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\PDF_OCR.exe")) {
+            Write-Error "dist\PDF_OCR.exe not found!"
+            exit 1
+          }
+          $size = (Get-Item "dist\PDF_OCR.exe").Length / 1MB
+          Write-Host "EXE size: $([math]::Round($size,1)) MB"
 
       # ── Release ──────────────────────────────────────────────────────────────
       - name: Upload artifact
@@ -93,12 +98,13 @@ jobs:
             ## PDF OCR ${{ github.ref_name }}
 
             ### Download
-            Baixe o `PDF_OCR.exe` abaixo e execute — **sem instalar nada**.
+            Baixe o `PDF_OCR.exe` e execute diretamente — **sem instalar nada**.
             Tesseract OCR e Poppler já estão embutidos no executável.
 
-            ### Novidades
-            - Janela de loading animada (círculo girando) durante o OCR
-            - Tesseract e Poppler embutidos no EXE (sem instalação extra)
-            - Aba Sobre com auto-update e botão de verificação manual
+            ### Novidades desta versão
+            - Janela de atualização com changelog completo ao detectar nova versão
+            - Download e aplicação automática do update com barra de progresso
+            - Projeto estruturado para VS Code (.vscode/, launch.json, extensions.json)
+            - Correção do build: link do Tesseract atualizado para v5.4.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

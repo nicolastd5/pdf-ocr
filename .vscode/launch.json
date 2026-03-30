@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Executar PDF OCR",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/pdf_ocr.py",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
