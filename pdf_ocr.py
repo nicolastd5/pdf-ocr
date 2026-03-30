@@ -30,7 +30,7 @@ except ImportError as e:
     DEPS_OK = False
     MISSING_DEP = str(e)
 
-APP_VERSION = "0.9"
+APP_VERSION = "0.9.1"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -79,7 +79,7 @@ def validate_license_online(key: str, hw_id: str):
         method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=45) as resp:
             data = _json.loads(resp.read())
             return True, data.get("message", "OK")
     except urllib.error.HTTPError as e:
@@ -608,7 +608,7 @@ del "%~f0"
 class LicenseDialog(tk.Toplevel):
     """Tela de ativação de licença mostrada quando não há licença válida."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, saved_license=None):
         super().__init__(parent)
         self.title("Ativar PDF OCR")
         self.resizable(False, False)
@@ -679,6 +679,27 @@ class LicenseDialog(tk.Toplevel):
 
         self._center()
 
+        # Se já tem licença salva, valida silenciosamente em background
+        if saved_license:
+            self.activate_btn.configure(state="disabled", text="Verificando...")
+            self.status_lbl.configure(fg=C["fg_dim"])
+            self.status_var.set("Verificando licença existente (pode levar até 30s)...")
+
+            def _silent_check():
+                ok, msg = validate_license_online(saved_license["key"], saved_license["hw_id"])
+                def _done():
+                    if ok:
+                        self.result = True
+                        self.destroy()
+                    else:
+                        # Licença inválida/revogada — libera para redigitar
+                        self.activate_btn.configure(state="normal", text="Ativar")
+                        self.status_lbl.configure(fg=C["error"])
+                        self.status_var.set(f"Licença inválida: {msg}")
+                self.after(0, _done)
+
+            threading.Thread(target=_silent_check, daemon=True).start()
+
     def _center(self):
         self.update_idletasks()
         w, h = self.winfo_width(), self.winfo_height()
@@ -692,13 +713,14 @@ class LicenseDialog(tk.Toplevel):
             self.status_var.set("Digite a chave de licença.")
             return
         self.activate_btn.configure(state="disabled", text="Verificando...")
-        self.status_var.set("")
+        self.status_var.set("Conectando ao servidor (pode levar até 30s)...")
         hw_id = _get_hw_id()
 
         def _check():
             ok, msg = validate_license_online(key, hw_id)
             def _done():
                 self.activate_btn.configure(state="normal", text="Ativar")
+                self.status_var.set("")
                 if ok:
                     _save_license(key, hw_id)
                     self.result = True
@@ -1269,19 +1291,9 @@ if __name__ == "__main__":
 
     license_ok = False
     saved = _load_license()
-    if saved:
-        ok, _ = validate_license_online(saved["key"], saved["hw_id"])
-        if ok:
-            license_ok = True
-        else:
-            # Licença salva inválida/revogada — pede reativação
-            dlg = LicenseDialog(_root)
-            _root.wait_window(dlg)
-            license_ok = dlg.result
-    else:
-        dlg = LicenseDialog(_root)
-        _root.wait_window(dlg)
-        license_ok = dlg.result
+    dlg = LicenseDialog(_root, saved_license=saved)
+    _root.wait_window(dlg)
+    license_ok = dlg.result
 
     _root.destroy()
 
