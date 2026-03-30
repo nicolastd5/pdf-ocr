@@ -35,6 +35,62 @@ GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases"
+LICENSE_SERVER = "https://pdf-ocr-7ox6.onrender.com"
+LICENSE_FILE_NAME = "pdf_ocr_license.json"
+
+
+def _get_hw_id():
+    """Gera um ID estável baseado no nome do computador + username."""
+    import hashlib
+    raw = f"{os.environ.get('COMPUTERNAME','')}-{os.environ.get('USERNAME','')}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+def _license_path():
+    base = os.path.dirname(sys.executable if getattr(sys, "frozen", False)
+                           else os.path.abspath(__file__))
+    return os.path.join(base, LICENSE_FILE_NAME)
+
+
+def _load_license():
+    """Retorna {'key': ..., 'hw_id': ...} ou None."""
+    try:
+        with open(_license_path()) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_license(key: str, hw_id: str):
+    with open(_license_path(), "w") as f:
+        json.dump({"key": key, "hw_id": hw_id}, f)
+
+
+def validate_license_online(key: str, hw_id: str):
+    """
+    Retorna (True, mensagem) ou (False, mensagem_de_erro).
+    """
+    import urllib.request, urllib.error, json as _json
+    payload = _json.dumps({"key": key, "hw_id": hw_id}).encode()
+    req = urllib.request.Request(
+        f"{LICENSE_SERVER}/validate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read())
+            return True, data.get("message", "OK")
+    except urllib.error.HTTPError as e:
+        try:
+            detail = _json.loads(e.read()).get("detail", str(e))
+        except Exception:
+            detail = str(e)
+        return False, detail
+    except Exception as e:
+        return False, f"Sem conexão com servidor de licenças: {e}"
+
 
 # ─────────────────────────────────────────────────────────────
 #  Paleta VS Code Dark
