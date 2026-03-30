@@ -33,7 +33,7 @@ except ImportError as e:
     MISSING_DEP = str(e)
 
 APP_VERSION = "0.1"
-GITHUB_USER = "nicol"
+GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases"
