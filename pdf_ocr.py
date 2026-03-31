@@ -21,7 +21,7 @@ import shutil
 
 try:
     import pytesseract
-    from PIL import Image
+    from PIL import Image, ImageFilter, ImageEnhance, ImageOps, ImageTk
     from pdf2image import convert_from_path
     import reportlab.pdfgen.canvas as rl_canvas
     from reportlab.lib.utils import ImageReader
@@ -694,6 +694,30 @@ class PDFOcrApp(tk.Tk):
               background=[("active", C["panel"])],
               foreground=[("active", C["fg_bright"])])
 
+    # ── Thumbnail helpers ────────────────────────────────────
+
+    def _pdf_thumbnail(self, pdf_path, page_num=1, max_h=220):
+        """Gera thumbnail de uma página do PDF. Retorna ImageTk.PhotoImage ou None."""
+        try:
+            poppler_path = find_poppler()
+            imgs = convert_from_path(
+                pdf_path, dpi=72, poppler_path=poppler_path,
+                first_page=page_num, last_page=page_num)
+            img = imgs[0]
+            ratio = max_h / img.height
+            new_w = int(img.width * ratio)
+            img = img.resize((new_w, max_h), Image.LANCZOS)
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
+
+    def _pdf_thumbnail_async(self, pdf_path, page_num, max_h, callback):
+        """Gera thumbnail em background thread e chama callback(photo) na UI thread."""
+        def _worker():
+            photo = self._pdf_thumbnail(pdf_path, page_num, max_h)
+            self.after(0, lambda: callback(photo))
+        threading.Thread(target=_worker, daemon=True).start()
+
     # ── Layout principal ──────────────────────────────────────
 
     def _build_ui(self):
@@ -1239,14 +1263,23 @@ class PDFOcrApp(tk.Tk):
 
         tk.Frame(inner, bg=C["border"], height=1).grid(row=1, column=0, sticky="ew", pady=(0, 12))
 
+        # ── Preview + controles lado a lado ──────────────────────
+        content_f = tk.Frame(inner, bg=C["panel"])
+        content_f.grid(row=2, column=0, sticky="nsew", pady=(0, 8))
+        content_f.columnconfigure(0, weight=1)
+
+        # Coluna esquerda: controles
+        controls_f = tk.Frame(content_f, bg=C["panel"])
+        controls_f.pack(side="left", fill="both", expand=True)
+
         # ── Modo de divisão ──────────────────────────────────────
-        tk.Label(inner, text="Modo de divisão",
+        tk.Label(controls_f, text="Modo de divisão",
                  font=("Segoe UI", 9, "bold"), bg=C["panel"],
-                 fg=C["fg"]).grid(row=2, column=0, sticky="w", pady=(0, 8))
+                 fg=C["fg"]).pack(anchor="w", pady=(0, 8))
 
         self._split_mode = tk.StringVar(value="single")
-        modes_f = tk.Frame(inner, bg=C["panel"])
-        modes_f.grid(row=3, column=0, sticky="ew", pady=(0, 12))
+        modes_f = tk.Frame(controls_f, bg=C["panel"])
+        modes_f.pack(anchor="w", pady=(0, 12))
 
         for val, label in [("single", "Intervalo único"),
                            ("multi",  "Múltiplos intervalos"),
@@ -1261,8 +1294,8 @@ class PDFOcrApp(tk.Tk):
             ).pack(side="left", padx=(0, 20))
 
         # ── Painel modo único ────────────────────────────────────
-        self._split_single_f = tk.Frame(inner, bg=C["panel"])
-        self._split_single_f.grid(row=4, column=0, sticky="ew", pady=(0, 8))
+        self._split_single_f = tk.Frame(controls_f, bg=C["panel"])
+        self._split_single_f.pack(anchor="w", pady=(0, 8))
         tk.Label(self._split_single_f, text="De:", font=("Segoe UI", 9),
                  bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
         self._split_from = tk.StringVar(value="1")
@@ -1279,9 +1312,8 @@ class PDFOcrApp(tk.Tk):
         e_to.pack(side="left", ipady=3, padx=(4, 0))
 
         # ── Painel múltiplos intervalos ──────────────────────────
-        self._split_multi_f = tk.Frame(inner, bg=C["panel"])
-        self._split_multi_f.grid(row=4, column=0, sticky="ew", pady=(0, 8))
-        self._split_multi_f.grid_remove()  # oculto inicialmente
+        self._split_multi_f = tk.Frame(controls_f, bg=C["panel"])
+        # Starts hidden; shown via _split_update_mode_ui
 
         # campo de texto livre
         text_f = tk.Frame(self._split_multi_f, bg=C["panel"])
@@ -1301,11 +1333,38 @@ class PDFOcrApp(tk.Tk):
         _flat_btn(self._split_multi_f, "+ Adicionar intervalo",
                   self._split_add_interval_row, padx=8, pady=2).pack(anchor="w")
 
+        # Coluna direita: preview
+        preview_f = tk.Frame(content_f, bg=C["input"],
+                             highlightthickness=1,
+                             highlightbackground=C["border"])
+        preview_f.pack(side="right", padx=(16, 0))
+
+        self._split_preview_lbl = tk.Label(
+            preview_f, text="Pré-visualização",
+            font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
+            width=22, height=12, anchor="center")
+        self._split_preview_lbl.pack(padx=8, pady=8)
+        self._split_preview_photo = None  # keep reference
+
+        # Navegação de páginas no preview
+        nav_f = tk.Frame(preview_f, bg=C["input"])
+        nav_f.pack(pady=(0, 8))
+        _flat_btn(nav_f, "◀", self._split_preview_prev,
+                  padx=6, pady=2).pack(side="left", padx=(0, 4))
+        self._split_preview_page_var = tk.StringVar(value="")
+        tk.Label(nav_f, textvariable=self._split_preview_page_var,
+                 font=("Segoe UI", 8), bg=C["input"],
+                 fg=C["fg_dim"]).pack(side="left", padx=4)
+        _flat_btn(nav_f, "▶", self._split_preview_next,
+                  padx=6, pady=2).pack(side="left", padx=(4, 0))
+
+        self._split_preview_current = 1
+
         # ── Destino ──────────────────────────────────────────────
-        tk.Frame(inner, bg=C["border"], height=1).grid(row=5, column=0, sticky="ew", pady=(4, 10))
+        tk.Frame(inner, bg=C["border"], height=1).grid(row=3, column=0, sticky="ew", pady=(4, 10))
 
         dest_f = tk.Frame(inner, bg=C["panel"])
-        dest_f.grid(row=6, column=0, sticky="ew", pady=(0, 12))
+        dest_f.grid(row=4, column=0, sticky="ew", pady=(0, 12))
         self._split_same_dir = tk.BooleanVar(value=True)
         tk.Checkbutton(
             dest_f, text="Salvar na mesma pasta do arquivo original",
@@ -1320,13 +1379,13 @@ class PDFOcrApp(tk.Tk):
         self._split_status = tk.StringVar(value="Selecione um PDF para dividir.")
         tk.Label(inner, textvariable=self._split_status,
                  font=("Segoe UI", 9), bg=C["panel"],
-                 fg=C["fg_dim"], anchor="w").grid(row=7, column=0, sticky="ew", pady=(0, 4))
+                 fg=C["fg_dim"], anchor="w").grid(row=5, column=0, sticky="ew", pady=(0, 4))
 
         self._split_pb = CanvasProgressBar(inner, height=6)
-        self._split_pb.grid(row=8, column=0, sticky="ew", pady=(0, 10))
+        self._split_pb.grid(row=6, column=0, sticky="ew", pady=(0, 10))
 
         btn_f = tk.Frame(inner, bg=C["panel"])
-        btn_f.grid(row=9, column=0, sticky="w")
+        btn_f.grid(row=7, column=0, sticky="w")
         self.btn_split = _accent_btn(
             btn_f, text="  \u229f  Dividir PDF  ",
             command=self._start_split,
@@ -1356,18 +1415,50 @@ class PDFOcrApp(tk.Tk):
             fg=C["fg"])
         self._split_to.set(str(self._split_total_pages))
         self._split_status.set("Configure o modo de divisão e clique em Dividir.")
+        # Load preview of first page
+        self._split_preview_current = 1
+        self._split_load_preview(1)
+
+    def _split_load_preview(self, page_num):
+        """Carrega thumbnail da página no preview."""
+        if not self._split_pdf_path:
+            return
+        self._split_preview_page_var.set(f"{page_num} / {self._split_total_pages}")
+        self._split_preview_lbl.config(text="Carregando...", image="")
+        self._pdf_thumbnail_async(
+            self._split_pdf_path, page_num, 180,
+            self._split_set_preview)
+
+    def _split_set_preview(self, photo):
+        if photo:
+            self._split_preview_photo = photo  # prevent GC
+            self._split_preview_lbl.config(image=photo, text="")
+        else:
+            self._split_preview_lbl.config(text="Erro ao carregar", image="")
+
+    def _split_preview_prev(self):
+        if not self._split_pdf_path or self._split_preview_current <= 1:
+            return
+        self._split_preview_current -= 1
+        self._split_load_preview(self._split_preview_current)
+
+    def _split_preview_next(self):
+        if not self._split_pdf_path or self._split_preview_current >= self._split_total_pages:
+            return
+        self._split_preview_current += 1
+        self._split_load_preview(self._split_preview_current)
 
     def _split_update_mode_ui(self):
         mode = self._split_mode.get()
         if mode == "single":
-            self._split_single_f.grid()
-            self._split_multi_f.grid_remove()
+            self._split_single_f.pack(anchor="w", pady=(0, 8))
+            self._split_multi_f.pack_forget()
         elif mode == "multi":
-            self._split_single_f.grid_remove()
-            self._split_multi_f.grid()
+            self._split_single_f.pack_forget()
+            self._split_multi_f.pack(anchor="w", fill="x", pady=(0, 8))
         else:  # all
-            self._split_single_f.grid_remove()
-            self._split_multi_f.grid_remove()
+            self._split_single_f.pack_forget()
+            self._split_multi_f.pack_forget()
 
     def _split_add_interval_row(self):
         row_f = tk.Frame(self._split_rows_f, bg=C["panel"])
@@ -1534,7 +1625,7 @@ class PDFOcrApp(tk.Tk):
 
         # ── Cabeçalho / botões ───────────────────────────────────
         hdr = tk.Frame(inner, bg=C["panel"])
-        hdr.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        hdr.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         tk.Label(hdr, text="PDFs para juntar",
                  font=("Segoe UI", 9), bg=C["panel"],
                  fg=C["fg_dim"]).pack(side="left")
@@ -1573,6 +1664,8 @@ class PDFOcrApp(tk.Tk):
         self._merge_listbox.bind("<Button-1>",       self._merge_drag_start)
         self._merge_listbox.bind("<B1-Motion>",       self._merge_drag_motion)
         self._merge_listbox.bind("<ButtonRelease-1>", self._merge_drag_release)
+        # Preview on selection change
+        self._merge_listbox.bind("<<ListboxSelect>>", self._merge_on_select)
 
         # Drag & drop externo (arrastar arquivos do explorer)
         try:
@@ -1589,11 +1682,30 @@ class PDFOcrApp(tk.Tk):
         _flat_btn(ord_f, "↓", self._merge_move_down,
                   padx=10, pady=6).pack()
 
+        # ── Preview panel (right side) ───────────────────────────
+        preview_f = tk.Frame(inner, bg=C["input"],
+                             highlightthickness=1,
+                             highlightbackground=C["border"])
+        preview_f.grid(row=1, column=2, sticky="ns", padx=(8, 0), pady=(0, 8))
+
+        self._merge_preview_lbl = tk.Label(
+            preview_f, text="Selecione um PDF\npara pré-visualizar",
+            font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
+            width=22, anchor="center")
+        self._merge_preview_lbl.pack(padx=8, pady=8, expand=True)
+        self._merge_preview_photo = None  # keep reference
+
+        self._merge_preview_name = tk.Label(
+            preview_f, text="",
+            font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
+            wraplength=160)
+        self._merge_preview_name.pack(padx=8, pady=(0, 8))
+
         # ── Área de drop visual ──────────────────────────────────
         drop_f = tk.Frame(inner, bg=C["input"],
                           highlightthickness=1,
                           highlightbackground=C["border"])
-        drop_f.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        drop_f.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(0, 10))
         drop_lbl = tk.Label(drop_f,
                             text="⊞  Arraste PDFs aqui  ou  clique em + Adicionar PDFs",
                             font=("Segoe UI", 9), bg=C["input"],
@@ -1609,10 +1721,10 @@ class PDFOcrApp(tk.Tk):
 
         # ── Destino ──────────────────────────────────────────────
         tk.Frame(inner, bg=C["border"], height=1).grid(
-            row=3, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+            row=3, column=0, columnspan=3, sticky="ew", pady=(0, 10))
 
         dest_f = tk.Frame(inner, bg=C["panel"])
-        dest_f.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        dest_f.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(0, 12))
         self._merge_same_dir = tk.BooleanVar(value=True)
         tk.Checkbutton(
             dest_f, text="Salvar na mesma pasta do primeiro PDF",
@@ -1628,13 +1740,13 @@ class PDFOcrApp(tk.Tk):
         tk.Label(inner, textvariable=self._merge_status,
                  font=("Segoe UI", 9), bg=C["panel"],
                  fg=C["fg_dim"], anchor="w").grid(
-            row=5, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+            row=5, column=0, columnspan=3, sticky="ew", pady=(0, 4))
 
         self._merge_pb = CanvasProgressBar(inner, height=6)
-        self._merge_pb.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        self._merge_pb.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 10))
 
         btn_f = tk.Frame(inner, bg=C["panel"])
-        btn_f.grid(row=7, column=0, columnspan=2, sticky="w")
+        btn_f.grid(row=7, column=0, columnspan=3, sticky="w")
         self.btn_merge = _accent_btn(
             btn_f, text="  ⊞  Juntar PDFs  ",
             command=self._start_merge,
@@ -1673,12 +1785,42 @@ class PDFOcrApp(tk.Tk):
                     tk.END, f"{os.path.basename(p)}  ({n_pages} pág.)")
         self._merge_update_count()
 
+    def _merge_on_select(self, _event=None):
+        """Carrega preview do PDF selecionado na listbox."""
+        sel = self._merge_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx >= len(self._merge_files):
+            return
+        pdf_path = self._merge_files[idx]
+        name = os.path.basename(pdf_path)
+        self._merge_preview_name.config(text=name)
+        self._merge_preview_lbl.config(text="Carregando...", image="")
+        self._pdf_thumbnail_async(
+            pdf_path, 1, 180,
+            self._merge_set_preview)
+
+    def _merge_set_preview(self, photo):
+        if photo:
+            self._merge_preview_photo = photo  # prevent GC
+            self._merge_preview_lbl.config(image=photo, text="")
+        else:
+            self._merge_preview_lbl.config(text="Erro ao carregar", image="")
+
+    def _merge_reset_preview(self):
+        self._merge_preview_photo = None
+        self._merge_preview_lbl.config(
+            text="Selecione um PDF\npara pré-visualizar", image="")
+        self._merge_preview_name.config(text="")
+
     def _merge_remove_selected(self):
         sel = list(self._merge_listbox.curselection())
         for idx in reversed(sel):
             self._merge_listbox.delete(idx)
             del self._merge_files[idx]
         self._merge_update_count()
+        self._merge_reset_preview()
 
     def _merge_clear(self):
         self._merge_files.clear()
@@ -1686,6 +1828,7 @@ class PDFOcrApp(tk.Tk):
         self._merge_pb.set(0)
         self._merge_status.set("Adicione PDFs para juntar.")
         self._merge_update_count()
+        self._merge_reset_preview()
 
     def _merge_update_count(self):
         n = len(self._merge_files)
@@ -2183,6 +2326,51 @@ class PDFOcrApp(tk.Tk):
         self._running = False
         self.after(0, lambda: self.btn_run.config(state="normal"))
 
+    @staticmethod
+    def _preprocess_for_ocr(pil_img):
+        """Preprocessa imagem para melhorar precisão do OCR.
+
+        Pipeline: grayscale → contraste → nitidez → binarização Otsu.
+        Retorna imagem processada no mesmo tamanho da original.
+        """
+        # Converter para escala de cinza
+        gray = pil_img.convert("L")
+
+        # Aumentar contraste
+        enhancer = ImageEnhance.Contrast(gray)
+        gray = enhancer.enhance(1.8)
+
+        # Nitidez leve para realçar bordas de caracteres
+        gray = gray.filter(ImageFilter.SHARPEN)
+
+        # Binarização adaptativa via Otsu (simples com pillow):
+        # Calcula threshold pelo histograma
+        hist = gray.histogram()
+        total = sum(hist)
+        current = 0
+        threshold = 128
+        weight_bg = 0
+        sum_bg = 0
+        sum_total = sum(i * hist[i] for i in range(256))
+        max_variance = 0
+        for i in range(256):
+            weight_bg += hist[i]
+            if weight_bg == 0:
+                continue
+            weight_fg = total - weight_bg
+            if weight_fg == 0:
+                break
+            sum_bg += i * hist[i]
+            mean_bg = sum_bg / weight_bg
+            mean_fg = (sum_total - sum_bg) / weight_fg
+            variance = weight_bg * weight_fg * (mean_bg - mean_fg) ** 2
+            if variance > max_variance:
+                max_variance = variance
+                threshold = i
+
+        binary = gray.point(lambda p: 255 if p > threshold else 0)
+        return binary
+
     def _run_ocr_single(self, input_pdf, output_pdf, lang,
                         highlight_names, fi, total_files):
         """Processa um único PDF. Levanta exceção em caso de erro."""
@@ -2191,6 +2379,9 @@ class PDFOcrApp(tk.Tk):
         # Count pages first (lightweight — no image conversion)
         with open(input_pdf, "rb") as fh:
             total_pages = len(PyPDF2.PdfReader(fh).pages)
+
+        # Tesseract config: OEM 3 (best available), PSM 6 (block of text)
+        tess_config = "--oem 3 --psm 6"
 
         merger = PyPDF2.PdfWriter()
 
@@ -2208,14 +2399,20 @@ class PDFOcrApp(tk.Tk):
                 input_pdf, dpi=300, poppler_path=poppler_path,
                 first_page=pi, last_page=pi)
             pil_img = page_imgs[0]
+            img_w, img_h = pil_img.size
+
+            # Preprocessar imagem para melhorar OCR
+            ocr_img = self._preprocess_for_ocr(pil_img)
 
             ocr_data = pytesseract.image_to_data(
-                pil_img, lang=lang,
+                ocr_img, lang=lang,
+                config=tess_config,
                 output_type=pytesseract.Output.DICT)
-            img_w, img_h = pil_img.size
+            del ocr_img  # free preprocessed image
 
             buf = io.BytesIO()
             c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
+            # Draw original (non-preprocessed) image for visual fidelity
             c.drawImage(ImageReader(pil_img), 0, 0,
                         width=img_w, height=img_h)
             del pil_img, page_imgs  # free memory immediately
@@ -2232,6 +2429,7 @@ class PDFOcrApp(tk.Tk):
                                fill=1, stroke=0)
                     c.restoreState()
 
+            # Invisible text layer — minimum confidence threshold 20
             c.setFillColorRGB(0, 0, 0, alpha=0)
             for j in range(len(ocr_data["text"])):
                 word = ocr_data["text"][j]
@@ -2239,7 +2437,7 @@ class PDFOcrApp(tk.Tk):
                     conf = int(ocr_data["conf"][j])
                 except (TypeError, ValueError):
                     conf = -1
-                if not word or not word.strip() or conf <= 0:
+                if not word or not word.strip() or conf < 20:
                     continue
                 x, y = ocr_data["left"][j], ocr_data["top"][j]
                 w, h = ocr_data["width"][j], ocr_data["height"][j]
