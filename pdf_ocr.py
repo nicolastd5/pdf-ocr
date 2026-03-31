@@ -1843,10 +1843,10 @@ class PDFOcrApp(tk.Tk):
                                    "com destaque automático de nomes de pessoas."),
             ("⊜", "Comprimir",    "Reduz o tamanho de PDFs com opções de\n"
                                    "qualidade (100–250 DPI) e formato (JPEG/PNG)."),
-            ("⊟", "Dividir PDF",  "Separa um PDF em partes individuais.\n"
-                                   "Em breve."),
-            ("⊞", "Juntar PDF",   "Une múltiplos PDFs em um único arquivo.\n"
-                                   "Em breve."),
+            ("⊟", "Dividir PDF",  "Separa um PDF por intervalo único, múltiplos\n"
+                                   "intervalos ou todas as páginas individualmente."),
+            ("⊞", "Juntar PDF",   "Une múltiplos PDFs em ordem personalizável,\n"
+                                   "com drag & drop e reordenação por ↑↓."),
         ]
         for icon, title, desc in _features:
             row_f = tk.Frame(feats_f, bg=C["panel"])
