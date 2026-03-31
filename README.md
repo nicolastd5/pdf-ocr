@@ -72,31 +72,23 @@ Você também pode verificar manualmente clicando em **Verificar atualização**
 
 ---
 
-## Estrutura do projeto
+## Histórico de versões
 
-```
-pdf_ocr/
-├── pdf_ocr.py          # Código principal
-├── pdf_ocr.spec        # Configuração do PyInstaller
-├── requirements.txt    # Dependências Python
-├── deps/               # Binários bundled (Tesseract + Poppler) — não versionado
-└── .github/
-    └── workflows/
-        └── build.yml   # CI/CD: build e release automático
-```
+Veja [CHANGELOG.md](CHANGELOG.md) para detalhes das mudanças em cada versão.
 
 ---
 
-## Tecnologias utilizadas
+## Compilando do código-fonte
 
-| Biblioteca | Finalidade |
-|---|---|
-| [pytesseract](https://github.com/madmaze/pytesseract) | Wrapper Python para o Tesseract OCR |
-| [pdf2image](https://github.com/Belval/pdf2image) | Conversão de páginas PDF em imagens |
-| [Pillow](https://python-pillow.org/) | Processamento de imagens |
-| [reportlab](https://www.reportlab.com/) | Geração de overlay de texto invisível |
-| [PyPDF2](https://github.com/py-pdf/pypdf) | Mesclagem de camadas PDF, divisão e junção |
-| [PyInstaller](https://pyinstaller.org/) | Empacotamento do executável |
+Para compilar o código-fonte, use `PyInstaller` com a configuração fornecida:
+
+```bash
+pyinstaller pdf_ocr.spec
+```
+
+O executável será gerado em `dist/PDF_Tools.exe`.
+
+> **Nota:** Para gerar o EXE com Tesseract e Poppler embutidos, copie os binários para `deps/tesseract/` e `deps/poppler/bin/` antes de rodar o PyInstaller. O workflow do GitHub Actions faz isso automaticamente.
 
 ---
 
