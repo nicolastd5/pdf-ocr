@@ -1385,6 +1385,182 @@ class PDFOcrApp(tk.Tk):
         )
         self.btn_split.pack(side="left")
 
+    def _split_select_file(self):
+        path = filedialog.askopenfilename(
+            title="Selecionar PDF para dividir",
+            filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            reader = PyPDF2.PdfReader(path)
+            self._split_total_pages = len(reader.pages)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível abrir o PDF:\n{e}")
+            return
+        self._split_pdf_path = path
+        name = os.path.basename(path)
+        self._split_file_lbl.config(
+            text=f"{name}  ({self._split_total_pages} páginas)",
+            fg=C["fg"])
+        self._split_to.set(str(self._split_total_pages))
+        self._split_status.set("Configure o modo de divisão e clique em Dividir.")
+
+    def _split_update_mode_ui(self):
+        mode = self._split_mode.get()
+        if mode == "single":
+            self._split_single_f.grid()
+            self._split_multi_f.grid_remove()
+        elif mode == "multi":
+            self._split_single_f.grid_remove()
+            self._split_multi_f.grid()
+        else:  # all
+            self._split_single_f.grid_remove()
+            self._split_multi_f.grid_remove()
+
+    def _split_add_interval_row(self):
+        row_f = tk.Frame(self._split_rows_f, bg=C["panel"])
+        row_f.pack(fill="x", pady=2)
+        v_from = tk.StringVar(value="1")
+        v_to   = tk.StringVar(value="1")
+        tk.Label(row_f, text="De:", font=("Segoe UI", 9),
+                 bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
+        e_f = tk.Entry(row_f, textvariable=v_from, width=5, font=("Segoe UI", 9))
+        _style_entry(e_f)
+        e_f.pack(side="left", ipady=3, padx=(4, 8))
+        tk.Label(row_f, text="Até:", font=("Segoe UI", 9),
+                 bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
+        e_t = tk.Entry(row_f, textvariable=v_to, width=5, font=("Segoe UI", 9))
+        _style_entry(e_t)
+        e_t.pack(side="left", ipady=3, padx=(4, 8))
+        _flat_btn(row_f, "×", lambda f=row_f, vs=(v_from, v_to): self._split_remove_interval_row(f, vs),
+                  padx=6, pady=1).pack(side="left")
+        self._split_intervals.append((v_from, v_to))
+
+    def _split_remove_interval_row(self, frame, vars_tuple):
+        if vars_tuple in self._split_intervals:
+            self._split_intervals.remove(vars_tuple)
+        frame.destroy()
+
+    def _parse_split_intervals(self):
+        """Retorna lista de (from_page, to_page) com índice 0-based, ou None em caso de erro."""
+        mode = self._split_mode.get()
+        total = self._split_total_pages
+        intervals = []
+
+        if mode == "single":
+            try:
+                f = int(self._split_from.get())
+                t = int(self._split_to.get())
+            except ValueError:
+                messagebox.showerror("Erro", "Digite números válidos para De e Até.")
+                return None
+            if not (1 <= f <= t <= total):
+                messagebox.showerror("Erro", f"Páginas devem estar entre 1 e {total}, com De ≤ Até.")
+                return None
+            intervals = [(f - 1, t - 1)]
+
+        elif mode == "multi":
+            # Tenta linhas visuais primeiro
+            for v_from, v_to in self._split_intervals:
+                try:
+                    f = int(v_from.get())
+                    t = int(v_to.get())
+                except ValueError:
+                    messagebox.showerror("Erro", "Preencha todos os campos De/Até com números.")
+                    return None
+                if not (1 <= f <= t <= total):
+                    messagebox.showerror("Erro", f"Intervalo {f}-{t} inválido. Páginas de 1 a {total}.")
+                    return None
+                intervals.append((f - 1, t - 1))
+
+            # Se não há linhas visuais, parseia campo de texto
+            if not intervals:
+                text = self._split_text_intervals.get().strip()
+                if not text:
+                    messagebox.showerror("Erro", "Adicione intervalos ou preencha o campo de texto.")
+                    return None
+                import re
+                for part in text.split(","):
+                    part = part.strip()
+                    m = re.match(r'^(\d+)-(\d+)$', part)
+                    if m:
+                        f, t = int(m.group(1)), int(m.group(2))
+                    elif re.match(r'^\d+$', part):
+                        f = t = int(part)
+                    else:
+                        messagebox.showerror("Erro", f"Formato inválido: '{part}'. Use '1-3' ou '5'.")
+                        return None
+                    if not (1 <= f <= t <= total):
+                        messagebox.showerror("Erro", f"Intervalo {f}-{t} inválido. Páginas de 1 a {total}.")
+                        return None
+                    intervals.append((f - 1, t - 1))
+
+        else:  # all
+            intervals = [(i, i) for i in range(total)]
+
+        return intervals
+
+    def _start_split(self):
+        if not self._split_pdf_path:
+            messagebox.showwarning("Aviso", "Selecione um PDF primeiro.")
+            return
+        if self._split_running:
+            return
+        intervals = self._parse_split_intervals()
+        if intervals is None:
+            return
+
+        out_dir = ""
+        if not self._split_same_dir.get():
+            out_dir = filedialog.askdirectory(title="Pasta para salvar os PDFs divididos")
+            if not out_dir:
+                return
+
+        self._split_running = True
+        self.btn_split.config(state="disabled")
+        self._split_pb.set(0)
+        threading.Thread(
+            target=self._run_split,
+            args=(self._split_pdf_path, intervals, out_dir),
+            daemon=True,
+        ).start()
+
+    def _run_split(self, input_pdf, intervals, out_dir):
+        try:
+            reader = PyPDF2.PdfReader(input_pdf)
+            base = os.path.splitext(os.path.basename(input_pdf))[0]
+            dest = out_dir if out_dir else os.path.dirname(input_pdf)
+            total = len(intervals)
+            generated = []
+
+            for i, (f, t) in enumerate(intervals):
+                writer = PyPDF2.PdfWriter()
+                for p in range(f, t + 1):
+                    writer.add_page(reader.pages[p])
+                if f == t:
+                    out_name = f"{base}_p{f + 1}.pdf"
+                else:
+                    out_name = f"{base}_p{f + 1}-{t + 1}.pdf"
+                out_path = os.path.join(dest, out_name)
+                with open(out_path, "wb") as fh:
+                    writer.write(fh)
+                generated.append(out_path)
+                progress = (i + 1) / total
+                self.after(0, lambda v=progress: self._split_pb.set(v))
+                self.after(0, lambda n=i+1, tot=total: self._split_status.set(
+                    f"Processando... {n}/{tot}"))
+
+            self.after(0, lambda: self._split_status.set(
+                f"{len(generated)} arquivo(s) gerado(s) em: {dest}"))
+            self.after(0, lambda: self._split_pb.set(1.0))
+        except Exception as e:
+            self.after(0, lambda: messagebox.showerror("Erro ao dividir", str(e)))
+            self.after(0, lambda: self._split_status.set("Erro ao dividir o PDF."))
+        finally:
+            self._split_running = False
+            self.after(0, lambda: self.btn_split.config(state="normal"))
+
     # ── Página Sobre ──────────────────────────────────────────
 
     def _build_about_page(self):
