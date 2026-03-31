@@ -1218,6 +1218,7 @@ class PDFOcrApp(tk.Tk):
         page = tk.Frame(self._pages, bg=C["bg"])
         self._page_frames["split"] = page
         page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, weight=1)
 
         card = tk.Frame(page, bg=C["panel"],
                         highlightthickness=1,
