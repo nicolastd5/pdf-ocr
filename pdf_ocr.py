@@ -10,6 +10,7 @@ import threading
 import os
 import sys
 import json
+import re
 import ssl
 import webbrowser
 import urllib.request
@@ -1393,8 +1394,9 @@ class PDFOcrApp(tk.Tk):
         if not path:
             return
         try:
-            reader = PyPDF2.PdfReader(path)
-            self._split_total_pages = len(reader.pages)
+            with open(path, "rb") as fh:
+                reader = PyPDF2.PdfReader(fh)
+                self._split_total_pages = len(reader.pages)
         except Exception as e:
             messagebox.showerror("Erro", f"Não foi possível abrir o PDF:\n{e}")
             return
@@ -1480,7 +1482,6 @@ class PDFOcrApp(tk.Tk):
                 if not text:
                     messagebox.showerror("Erro", "Adicione intervalos ou preencha o campo de texto.")
                     return None
-                import re
                 for part in text.split(","):
                     part = part.strip()
                     m = re.match(r'^(\d+)-(\d+)$', part)
