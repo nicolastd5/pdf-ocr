@@ -1,6 +1,6 @@
-# PDF OCR
+# PDF Tools
 
-Converte PDFs escaneados em PDFs pesquisáveis aplicando OCR com Tesseract, sem necessidade de instalação de dependências externas.
+Conjunto de ferramentas para PDF com interface gráfica: OCR, compressão, divisão e junção de arquivos.
 
 ![Windows](https://img.shields.io/badge/Windows-10%2F11-blue?logo=windows)
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
@@ -11,13 +11,24 @@ Converte PDFs escaneados em PDFs pesquisáveis aplicando OCR com Tesseract, sem 
 
 ## Funcionalidades
 
+### OCR
 - Converte PDFs escaneados (imagens) em PDFs com texto pesquisável
 - OCR em **Português** e **Inglês** (Tesseract)
-- Interface gráfica simples e intuitiva
-- Barra de progresso por página
-- Seleção de pasta de saída personalizada
-- Atualização automática via GitHub Releases
-- Executável único — Tesseract e Poppler já embutidos
+- Destaque automático de nomes de pessoas
+
+### Comprimir
+- Reduz o tamanho de PDFs com opções de qualidade (100–250 DPI)
+- Formatos de compressão: JPEG ou PNG
+
+### Dividir PDF
+- Intervalo único: extraia um trecho específico (De / Até)
+- Múltiplos intervalos: campo de texto livre (`1-3, 5-8`) ou linhas visuais De/Até
+- Todas as páginas individualmente em um clique
+
+### Juntar PDF
+- Une múltiplos PDFs em um único arquivo
+- Reordene arrastando com o mouse ou usando os botões ↑↓
+- Suporte a drag & drop de arquivos do Explorer
 
 ---
 
@@ -25,18 +36,31 @@ Converte PDFs escaneados em PDFs pesquisáveis aplicando OCR com Tesseract, sem 
 
 Baixe o executável mais recente na página de [Releases](https://github.com/nicolastd5/pdf-ocr/releases/latest).
 
-Nenhuma instalação necessária. Basta executar `PDF_OCR.exe`.
+Nenhuma instalação necessária. Basta executar `PDF_Tools.exe`.
 
 ---
 
 ## Como usar
 
-1. Execute `PDF_OCR.exe`
+### OCR
+1. Execute `PDF_Tools.exe`
 2. Clique em **Adicionar PDFs** e selecione os arquivos desejados
 3. Escolha a pasta de saída (padrão: mesma pasta dos originais)
 4. Selecione o idioma (Português / Inglês)
 5. Clique em **Aplicar OCR**
 6. Os arquivos processados serão salvos com o sufixo `_ocr.pdf`
+
+### Dividir PDF
+1. Selecione o PDF que deseja dividir
+2. Escolha o modo: intervalo único, múltiplos intervalos ou todas as páginas
+3. Marque "Salvar na mesma pasta do arquivo original" ou escolha o destino
+4. Clique em **Dividir**
+
+### Juntar PDF
+1. Adicione os PDFs via botão ou arrastando do Explorer
+2. Reordene a lista conforme necessário
+3. Marque "Salvar na mesma pasta do primeiro PDF" ou escolha o destino
+4. Clique em **Juntar**
 
 ---
 
@@ -74,7 +98,7 @@ python pdf_ocr.py
 pyinstaller pdf_ocr.spec
 ```
 
-O executável será gerado em `dist/PDF_OCR.exe`.
+O executável será gerado em `dist/PDF_Tools.exe`.
 
 > **Nota:** Para gerar o EXE com Tesseract e Poppler embutidos, copie os binários para `deps/tesseract/` e `deps/poppler/bin/` antes de rodar o PyInstaller. O workflow do GitHub Actions faz isso automaticamente.
 
@@ -103,7 +127,7 @@ pdf_ocr/
 | [pdf2image](https://github.com/Belval/pdf2image) | Conversão de páginas PDF em imagens |
 | [Pillow](https://python-pillow.org/) | Processamento de imagens |
 | [reportlab](https://www.reportlab.com/) | Geração de overlay de texto invisível |
-| [PyPDF2](https://github.com/py-pdf/pypdf) | Mesclagem de camadas PDF |
+| [PyPDF2](https://github.com/py-pdf/pypdf) | Mesclagem de camadas PDF, divisão e junção |
 | [PyInstaller](https://pyinstaller.org/) | Empacotamento do executável |
 
 ---
