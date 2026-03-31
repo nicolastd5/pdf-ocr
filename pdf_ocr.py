@@ -634,6 +634,11 @@ class PDFOcrApp(tk.Tk):
         self._split_running = False
         self._split_intervals = []
 
+        # Merge
+        self._merge_files = []
+        self._merge_running = False
+        self._merge_drag_start_idx = None
+
         # ── Geral ────────────────────────────────────────────
         self.auto_update_var = tk.BooleanVar(value=True)
         self.update_status   = tk.StringVar(value="")
@@ -749,7 +754,7 @@ class PDFOcrApp(tk.Tk):
         self._build_ocr_page()
         self._build_compress_page()
         self._build_split_page()
-        self._build_coming_soon_page("merge")
+        self._build_merge_page()
         self._build_about_page()
 
     def _show_page(self, key):
@@ -1561,6 +1566,139 @@ class PDFOcrApp(tk.Tk):
         finally:
             self._split_running = False
             self.after(0, lambda: self.btn_split.config(state="normal"))
+
+    # ── Página Merge ─────────────────────────────────────────
+
+    def _build_merge_page(self):
+        page = tk.Frame(self._pages, bg=C["bg"])
+        self._page_frames["merge"] = page
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, weight=1)
+
+        card = tk.Frame(page, bg=C["panel"],
+                        highlightthickness=1,
+                        highlightbackground=C["border"])
+        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.columnconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)
+
+        inner = tk.Frame(card, bg=C["panel"], padx=20, pady=16)
+        inner.pack(fill="both", expand=True)
+        inner.columnconfigure(0, weight=1)
+        inner.rowconfigure(1, weight=1)
+
+        # ── Cabeçalho / botões ───────────────────────────────────
+        hdr = tk.Frame(inner, bg=C["panel"])
+        hdr.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        tk.Label(hdr, text="PDFs para juntar",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
+        self._merge_count_lbl = tk.Label(
+            hdr, text="(0 arquivos)", font=("Segoe UI", 9),
+            bg=C["panel"], fg=C["fg_dim"])
+        self._merge_count_lbl.pack(side="left", padx=(6, 0))
+        _flat_btn(hdr, "✕ Remover", self._merge_remove_selected,
+                  padx=8, pady=2).pack(side="right")
+        _flat_btn(hdr, "+ Adicionar PDFs", self._merge_add_files,
+                  padx=8, pady=2).pack(side="right", padx=(0, 4))
+
+        # ── Listbox ──────────────────────────────────────────────
+        list_f = tk.Frame(inner, bg=C["panel"])
+        list_f.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
+        list_f.columnconfigure(0, weight=1)
+        list_f.rowconfigure(0, weight=1)
+
+        sb = ttk.Scrollbar(list_f, orient="vertical",
+                           style="Dark.Vertical.TScrollbar")
+        self._merge_listbox = tk.Listbox(
+            list_f,
+            bg=C["input"], fg=C["fg"],
+            selectbackground=C["sel"], selectforeground=C["fg_bright"],
+            relief="flat", highlightthickness=1,
+            highlightbackground=C["border"],
+            highlightcolor=C["accent"],
+            font=("Segoe UI", 9), activestyle="none",
+            yscrollcommand=sb.set,
+        )
+        sb.config(command=self._merge_listbox.yview)
+        self._merge_listbox.grid(row=0, column=0, sticky="nsew")
+        sb.grid(row=0, column=1, sticky="ns")
+
+        # Drag & drop interno (reordenação com mouse)
+        self._merge_listbox.bind("<Button-1>",       self._merge_drag_start)
+        self._merge_listbox.bind("<B1-Motion>",       self._merge_drag_motion)
+        self._merge_listbox.bind("<ButtonRelease-1>", self._merge_drag_release)
+
+        # Drag & drop externo (arrastar arquivos do explorer)
+        try:
+            self._merge_listbox.drop_target_register("DND_Files")
+            self._merge_listbox.dnd_bind("<<Drop>>", self._merge_drop_files)
+        except Exception:
+            pass  # tkinterdnd2 não disponível
+
+        # ── Botões ↑ ↓ ──────────────────────────────────────────
+        ord_f = tk.Frame(inner, bg=C["panel"])
+        ord_f.grid(row=1, column=1, sticky="ns", padx=(8, 0), pady=(0, 8))
+        _flat_btn(ord_f, "↑", self._merge_move_up,
+                  padx=10, pady=6).pack(pady=(0, 4))
+        _flat_btn(ord_f, "↓", self._merge_move_down,
+                  padx=10, pady=6).pack()
+
+        # ── Área de drop visual ──────────────────────────────────
+        drop_f = tk.Frame(inner, bg=C["input"],
+                          highlightthickness=1,
+                          highlightbackground=C["border"])
+        drop_f.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        drop_lbl = tk.Label(drop_f,
+                            text="⊞  Arraste PDFs aqui  ou  clique em + Adicionar PDFs",
+                            font=("Segoe UI", 9), bg=C["input"],
+                            fg=C["fg_dim"], pady=10)
+        drop_lbl.pack()
+        try:
+            drop_f.drop_target_register("DND_Files")
+            drop_f.dnd_bind("<<Drop>>", self._merge_drop_files)
+            drop_lbl.drop_target_register("DND_Files")
+            drop_lbl.dnd_bind("<<Drop>>", self._merge_drop_files)
+        except Exception:
+            pass
+
+        # ── Destino ──────────────────────────────────────────────
+        tk.Frame(inner, bg=C["border"], height=1).grid(
+            row=3, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+
+        dest_f = tk.Frame(inner, bg=C["panel"])
+        dest_f.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        self._merge_same_dir = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            dest_f, text="Salvar na mesma pasta do primeiro PDF",
+            variable=self._merge_same_dir,
+            bg=C["panel"], fg=C["fg"],
+            selectcolor=C["input"],
+            activebackground=C["panel"], activeforeground=C["accent"],
+            font=("Segoe UI", 9),
+        ).pack(side="left")
+
+        # ── Progresso e botão ────────────────────────────────────
+        self._merge_status = tk.StringVar(value="Adicione PDFs para juntar.")
+        tk.Label(inner, textvariable=self._merge_status,
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"], anchor="w").grid(
+            row=5, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+
+        self._merge_pb = CanvasProgressBar(inner, height=6)
+        self._merge_pb.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+
+        btn_f = tk.Frame(inner, bg=C["panel"])
+        btn_f.grid(row=7, column=0, columnspan=2, sticky="w")
+        self.btn_merge = _accent_btn(
+            btn_f, text="  ⊞  Juntar PDFs  ",
+            command=self._start_merge,
+            font=("Segoe UI", 10, "bold"),
+            padx=18, pady=9,
+        )
+        self.btn_merge.pack(side="left", padx=(0, 10))
+        _flat_btn(btn_f, "Limpar lista", self._merge_clear,
+                  padx=14, pady=9).pack(side="left")
 
     # ── Página Sobre ──────────────────────────────────────────
 
