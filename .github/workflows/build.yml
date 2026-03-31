@@ -153,19 +153,19 @@ jobs:
       - name: Verify EXE
         shell: pwsh
         run: |
-          if (-not (Test-Path "dist\PDF_OCR.exe")) {
-            Write-Error "dist\PDF_OCR.exe not found!"
+          if (-not (Test-Path "dist\PDF_Tools.exe")) {
+            Write-Error "dist\PDF_Tools.exe not found!"
             exit 1
           }
-          $size = [math]::Round((Get-Item "dist\PDF_OCR.exe").Length / 1MB, 1)
+          $size = [math]::Round((Get-Item "dist\PDF_Tools.exe").Length / 1MB, 1)
           Write-Host "EXE gerado com sucesso: $size MB"
 
       # ── Release ──────────────────────────────────────────────────────────────
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PDF_OCR_Windows
-          path: dist/PDF_OCR.exe
+          name: PDF_Tools_Windows
+          path: dist/PDF_Tools.exe
 
       - name: Resolve release tag
         id: resolve_tag
@@ -185,8 +185,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.resolve_tag.outputs.tag }}
-          files: dist/PDF_OCR.exe
-          name: "PDF OCR ${{ steps.resolve_tag.outputs.tag }}"
-          generate_release_notes: true
+          files: dist/PDF_Tools.exe
+          name: "PDF Tools ${{ steps.resolve_tag.outputs.tag }}"
+          body: |
+            ## v1.0.0 — Lançamento oficial
+
+            ### ✦ Dividir PDF
+            Separe um PDF em partes: intervalo único, múltiplos intervalos
+            (campo de texto ou visual) ou todas as páginas individualmente.
+
+            ### ✦ Juntar PDF
+            Una múltiplos PDFs em um único arquivo. Reordene arrastando
+            com o mouse ou usando os botões ↑↓. Suporte a drag & drop
+            de arquivos do Explorer.
+
+            ### ✦ Melhorias gerais
+            Correções de layout, melhor gerenciamento de recursos e
+            tratamento de erros aprimorado.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
