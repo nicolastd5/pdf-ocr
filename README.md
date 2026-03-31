@@ -72,38 +72,6 @@ Você também pode verificar manualmente clicando em **Verificar atualização**
 
 ---
 
-## Compilando do código-fonte
-
-### Pré-requisitos
-
-- Python 3.11
-- [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) instalado
-- [Poppler para Windows](https://github.com/oschwartz10612/poppler-windows/releases)
-
-### Instalação das dependências
-
-```bash
-pip install -r requirements.txt
-```
-
-### Executando sem compilar
-
-```bash
-python pdf_ocr.py
-```
-
-### Gerando o executável
-
-```bash
-pyinstaller pdf_ocr.spec
-```
-
-O executável será gerado em `dist/PDF_Tools.exe`.
-
-> **Nota:** Para gerar o EXE com Tesseract e Poppler embutidos, copie os binários para `deps/tesseract/` e `deps/poppler/bin/` antes de rodar o PyInstaller. O workflow do GitHub Actions faz isso automaticamente.
-
----
-
 ## Estrutura do projeto
 
 ```
