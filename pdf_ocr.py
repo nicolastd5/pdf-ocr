@@ -1915,6 +1915,51 @@ class PDFOcrApp(tk.Tk):
         )
         self.btn_update.pack(anchor="w", pady=(12, 0))
 
+        # card changelog
+        cl_card = tk.Frame(page, bg=C["panel"],
+                           highlightthickness=1,
+                           highlightbackground=C["border"])
+        cl_card.pack(fill="x", padx=24, pady=(12, 0))
+
+        cl_inner = tk.Frame(cl_card, bg=C["panel"], padx=20, pady=16)
+        cl_inner.pack(fill="x")
+
+        tk.Label(cl_inner, text="O que há de novo — v1.0.0",
+                 font=("Segoe UI", 10, "bold"),
+                 bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
+
+        _changelog = [
+            ("⊟", "Dividir PDF",
+             "Separe um PDF em partes: intervalo único, múltiplos\n"
+             "intervalos (campo de texto ou visual) ou todas as\n"
+             "páginas individualmente."),
+            ("⊞", "Juntar PDF",
+             "Una múltiplos PDFs em um único arquivo. Reordene\n"
+             "arrastando com o mouse ou usando os botões ↑↓.\n"
+             "Suporte a drag & drop de arquivos do Explorer."),
+            ("⚙", "Melhorias gerais",
+             "Correções de layout, melhor gerenciamento de recursos\n"
+             "e tratamento de erros aprimorado."),
+        ]
+
+        cl_f = tk.Frame(cl_inner, bg=C["panel"])
+        cl_f.pack(anchor="w", pady=(10, 0))
+        for icon, title, desc in _changelog:
+            row_f = tk.Frame(cl_f, bg=C["panel"])
+            row_f.pack(anchor="w", pady=(0, 8))
+            tk.Label(row_f, text=icon,
+                     font=("Segoe UI", 12), bg=C["panel"],
+                     fg=C["accent"], width=3).pack(side="left", anchor="n")
+            txt_f = tk.Frame(row_f, bg=C["panel"])
+            txt_f.pack(side="left", anchor="w")
+            tk.Label(txt_f, text=title,
+                     font=("Segoe UI", 9, "bold"),
+                     bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
+            tk.Label(txt_f, text=desc,
+                     font=("Segoe UI", 8),
+                     bg=C["panel"], fg=C["fg_dim"],
+                     justify="left").pack(anchor="w")
+
         self.after(1500, self._auto_update_check)
 
     # ── Prefs ─────────────────────────────────────────────────
