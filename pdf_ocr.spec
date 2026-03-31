@@ -76,7 +76,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='PDF_OCR',
+    name='PDF_Tools',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
