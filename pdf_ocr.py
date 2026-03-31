@@ -1700,6 +1700,157 @@ class PDFOcrApp(tk.Tk):
         _flat_btn(btn_f, "Limpar lista", self._merge_clear,
                   padx=14, pady=9).pack(side="left")
 
+    def _merge_add_files(self):
+        paths = filedialog.askopenfilenames(
+            title="Selecionar PDFs para juntar",
+            filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
+        )
+        self._merge_insert_paths(paths)
+
+    def _merge_drop_files(self, event):
+        raw = event.data
+        paths = re.findall(r'\{([^}]+)\}|(\S+)', raw)
+        flat = [p[0] or p[1] for p in paths]
+        pdf_paths = [p for p in flat if p.lower().endswith(".pdf")]
+        self._merge_insert_paths(pdf_paths)
+
+    def _merge_insert_paths(self, paths):
+        for p in paths:
+            if p not in self._merge_files:
+                try:
+                    with open(p, "rb") as fh:
+                        reader = PyPDF2.PdfReader(fh)
+                        n_pages = len(reader.pages)
+                except Exception:
+                    n_pages = "?"
+                self._merge_files.append(p)
+                self._merge_listbox.insert(
+                    tk.END, f"{os.path.basename(p)}  ({n_pages} pág.)")
+        self._merge_update_count()
+
+    def _merge_remove_selected(self):
+        sel = list(self._merge_listbox.curselection())
+        for idx in reversed(sel):
+            self._merge_listbox.delete(idx)
+            del self._merge_files[idx]
+        self._merge_update_count()
+
+    def _merge_clear(self):
+        self._merge_files.clear()
+        self._merge_listbox.delete(0, tk.END)
+        self._merge_pb.set(0)
+        self._merge_status.set("Adicione PDFs para juntar.")
+        self._merge_update_count()
+
+    def _merge_update_count(self):
+        n = len(self._merge_files)
+        self._merge_count_lbl.config(
+            text=f"({n} arquivo{'s' if n != 1 else ''})")
+
+    def _merge_move_up(self):
+        sel = self._merge_listbox.curselection()
+        if not sel or sel[0] == 0:
+            return
+        idx = sel[0]
+        self._merge_files[idx], self._merge_files[idx - 1] = \
+            self._merge_files[idx - 1], self._merge_files[idx]
+        text = self._merge_listbox.get(idx)
+        self._merge_listbox.delete(idx)
+        self._merge_listbox.insert(idx - 1, text)
+        self._merge_listbox.selection_set(idx - 1)
+
+    def _merge_move_down(self):
+        sel = self._merge_listbox.curselection()
+        if not sel or sel[0] >= self._merge_listbox.size() - 1:
+            return
+        idx = sel[0]
+        self._merge_files[idx], self._merge_files[idx + 1] = \
+            self._merge_files[idx + 1], self._merge_files[idx]
+        text = self._merge_listbox.get(idx)
+        self._merge_listbox.delete(idx)
+        self._merge_listbox.insert(idx + 1, text)
+        self._merge_listbox.selection_set(idx + 1)
+
+    def _merge_drag_start(self, event):
+        self._merge_drag_start_idx = self._merge_listbox.nearest(event.y)
+
+    def _merge_drag_motion(self, event):
+        if self._merge_drag_start_idx is None:
+            return
+        idx = self._merge_listbox.nearest(event.y)
+        if idx != self._merge_drag_start_idx:
+            self._merge_files[idx], self._merge_files[self._merge_drag_start_idx] = \
+                self._merge_files[self._merge_drag_start_idx], self._merge_files[idx]
+            text_from = self._merge_listbox.get(self._merge_drag_start_idx)
+            text_to   = self._merge_listbox.get(idx)
+            self._merge_listbox.delete(self._merge_drag_start_idx)
+            self._merge_listbox.insert(self._merge_drag_start_idx, text_to)
+            self._merge_listbox.delete(idx)
+            self._merge_listbox.insert(idx, text_from)
+            self._merge_drag_start_idx = idx
+            self._merge_listbox.selection_clear(0, tk.END)
+            self._merge_listbox.selection_set(idx)
+
+    def _merge_drag_release(self, event):
+        self._merge_drag_start_idx = None
+
+    def _start_merge(self):
+        if len(self._merge_files) < 2:
+            messagebox.showwarning("Aviso", "Adicione ao menos 2 PDFs para juntar.")
+            return
+        if self._merge_running:
+            return
+
+        if self._merge_same_dir.get():
+            out_dir = os.path.dirname(self._merge_files[0])
+            out_path = os.path.join(out_dir, "merged.pdf")
+        else:
+            out_path = filedialog.asksaveasfilename(
+                title="Salvar PDF juntado como",
+                defaultextension=".pdf",
+                filetypes=[("Arquivo PDF", "*.pdf")],
+                initialfile="merged.pdf",
+            )
+            if not out_path:
+                return
+
+        self._merge_running = True
+        self.btn_merge.config(state="disabled")
+        self._merge_pb.set(0)
+        threading.Thread(
+            target=self._run_merge,
+            args=(list(self._merge_files), out_path),
+            daemon=True,
+        ).start()
+
+    def _run_merge(self, files, out_path):
+        try:
+            merger = PyPDF2.PdfMerger()
+            total = len(files)
+            for i, f in enumerate(files):
+                merger.append(f)
+                progress = (i + 1) / total
+                self.after(0, lambda v=progress: self._merge_pb.set(v))
+                self.after(0, lambda n=i+1, tot=total: self._merge_status.set(
+                    f"Processando... {n}/{tot}"))
+
+            with open(out_path, "wb") as fh:
+                merger.write(fh)
+            merger.close()
+
+            with open(out_path, "rb") as fh:
+                reader = PyPDF2.PdfReader(fh)
+                n_pages = len(reader.pages)
+            self.after(0, lambda: self._merge_status.set(
+                f"PDF gerado: {os.path.basename(out_path)}  ({n_pages} páginas)  →  {os.path.dirname(out_path)}"))
+            self.after(0, lambda: self._merge_pb.set(1.0))
+        except Exception as e:
+            self.after(0, lambda: messagebox.showerror("Erro ao juntar", str(e)))
+            self.after(0, lambda: self._merge_status.set("Erro ao juntar os PDFs."))
+        finally:
+            self._merge_running = False
+            self.after(0, lambda: self.btn_merge.config(state="normal"))
+
     # ── Página Sobre ──────────────────────────────────────────
 
     def _build_about_page(self):
