@@ -15,8 +15,6 @@ import ssl
 import webbrowser
 import urllib.request
 import urllib.error
-import tempfile
-import subprocess
 import shutil
 import io
 
@@ -605,29 +603,17 @@ class UpdateDialog(tk.Toplevel):
 
         tk.Frame(root, bg=C["border"], height=1).pack(fill="x")
 
-        # progresso
-        self._prog_frame = tk.Frame(root, bg=C["panel"], padx=24, pady=8)
-        self._prog_frame.pack(fill="x")
-        self._prog_label = tk.Label(self._prog_frame, text="",
-                                    font=("Segoe UI", 8),
-                                    bg=C["panel"], fg=C["fg_dim"])
-        self._prog_label.pack(anchor="w")
-        self._prog_bar = CanvasProgressBar(self._prog_frame, width=420)
-        self._prog_bar.pack(fill="x", pady=(4, 0))
-        self._prog_frame.pack_forget()
-
         # botões
-        self._btn_row = tk.Frame(root, bg=C["panel"], padx=24, pady=16)
-        self._btn_row.pack(fill="x")
-        self._btn_update = _accent_btn(
-            self._btn_row,
-            text="  Atualizar agora  ",
-            command=self._start_download,
+        btn_row = tk.Frame(root, bg=C["panel"], padx=24, pady=16)
+        btn_row.pack(fill="x")
+        _accent_btn(
+            btn_row,
+            text="  Baixar atualização  ",
+            command=self._open_release,
             padx=16, pady=8
-        )
-        self._btn_update.pack(side="left", padx=(0, 10))
+        ).pack(side="left", padx=(0, 10))
         _flat_btn(
-            self._btn_row, text="Agora não",
+            btn_row, text="Agora não",
             command=self._dismiss,
             padx=12, pady=8
         ).pack(side="left")
@@ -640,110 +626,16 @@ class UpdateDialog(tk.Toplevel):
         y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_reqheight()) // 2
         self.geometry(f"+{x}+{y}")
 
+    def _open_release(self):
+        webbrowser.open(self._info.get("html_url", GITHUB_RELEASES_PAGE))
+        self._dismiss()
+
     def _dismiss(self):
         try:
             self.grab_release()
         except Exception:
             pass
         self.destroy()
-
-    def _start_download(self):
-        exe_url = self._info.get("exe_url")
-        if not exe_url:
-            messagebox.showwarning(
-                "Sem executável",
-                "Esta release não possui um .exe para download.\n\n"
-                "Acesse manualmente:\n" + self._info.get("html_url", GITHUB_RELEASES_PAGE),
-                parent=self
-            )
-            return
-        self._btn_update.config(state="disabled", text="  Baixando...  ")
-        self._prog_frame.pack(fill="x", before=self._btn_row, padx=0, pady=(0, 4))
-        threading.Thread(target=self._download_and_apply,
-                         args=(exe_url,), daemon=True).start()
-
-    def _download_and_apply(self, url):
-        try:
-            tmp_dir = tempfile.mkdtemp(prefix="pdfocr_update_")
-            tmp_exe = os.path.join(tmp_dir, "PDF_OCR_new.exe")
-            req = urllib.request.Request(url, headers={"User-Agent": f"pdf-tools/{APP_VERSION}"})
-            with _urlopen_ssl(req, timeout=300) as resp:
-                total      = int(resp.headers.get("Content-Length", 0))
-                downloaded = 0
-                chunk      = 65536
-                with open(tmp_exe, "wb") as f:
-                    while True:
-                        data = resp.read(chunk)
-                        if not data:
-                            break
-                        f.write(data)
-                        downloaded += len(data)
-                        if total > 0:
-                            pct      = downloaded / total * 100
-                            mb_done  = downloaded / 1_048_576
-                            mb_total = total      / 1_048_576
-                            self.after(0, lambda p=pct, d=mb_done, t=mb_total:
-                                       self._update_progress(p, d, t))
-            self.after(0, lambda: self._apply_update(tmp_exe))
-        except Exception as e:
-            self.after(0, lambda: self._download_failed(str(e)))
-
-    def _update_progress(self, pct, mb_done, mb_total):
-        self._prog_bar.set(pct)
-        self._prog_label.config(
-            text=f"Baixando...  {mb_done:.1f} MB / {mb_total:.1f} MB  ({pct:.0f}%)"
-        )
-
-    def _apply_update(self, new_exe):
-        current_exe = sys.executable if getattr(sys, "frozen", False) else None
-        if current_exe and os.path.isfile(current_exe):
-            pid     = os.getpid()
-            bat_path = os.path.join(tempfile.gettempdir(), "pdfocr_update.bat")
-            old_exe  = current_exe + ".old"
-            with open(bat_path, "w") as f:
-                f.write(f"""@echo off
-:wait
-tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul
-if not errorlevel 1 (
-    ping 127.0.0.1 -n 2 > nul
-    goto wait
-)
-ping 127.0.0.1 -n 3 > nul
-if exist "{old_exe}" del /F /Q "{old_exe}"
-rename "{current_exe}" "{os.path.basename(old_exe)}"
-if errorlevel 1 (
-    msg * "PDF Tools: falha ao renomear executável. Copie manualmente: {new_exe}"
-    goto :eof
-)
-move /Y "{new_exe}" "{current_exe}"
-if errorlevel 1 (
-    rename "{old_exe}" "{os.path.basename(current_exe)}"
-    msg * "PDF Tools: falha ao instalar atualização. Copie manualmente: {new_exe}"
-    goto :eof
-)
-del /F /Q "{old_exe}" 2>nul
-start "" "{current_exe}"
-del "%~f0"
-""")
-            self._prog_label.config(text="Instalando atualização...")
-            self.after(400, lambda: self._launch_bat_and_quit(bat_path))
-        else:
-            self._prog_label.config(text="Download concluído!")
-            self.after(0, lambda: messagebox.showinfo(
-                "Download concluído",
-                f"Novo executável salvo em:\n{new_exe}\n\nSubstitua manualmente o arquivo atual.",
-                parent=self
-            ))
-
-    def _launch_bat_and_quit(self, bat_path):
-        subprocess.Popen(["cmd", "/c", bat_path],
-                         creationflags=subprocess.CREATE_NO_WINDOW,
-                         close_fds=True)
-        self._parent.quit()
-
-    def _download_failed(self, msg):
-        self._btn_update.config(state="normal", text="  Atualizar agora  ")
-        self._prog_label.config(text=f"Erro: {msg}")
         messagebox.showerror("Falha no download", msg, parent=self)
 
 
