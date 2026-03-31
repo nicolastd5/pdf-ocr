@@ -4,6 +4,20 @@ Todas as mudanças significativas neste projeto são documentadas neste arquivo.
 
 ---
 
+## [1.0.2] - 2026-03-31
+
+### 🎨 Redesign Visual Completo
+
+- **Paleta Ocean/Teal**: Cores modernizadas (#2dd4bf primária, #38bdf8 secundária)
+- **Sidebar expandível**: Animação suave (56px → 180px ao passar o mouse)
+- **Spinner dual orbital**: Duas arcos animados em velocidades diferentes
+- **Progress bar gradiente**: Animação de shimmer com transição de cores
+- **Glassmorphism**: Cards e botões com efeitos de vidro e hover melhorados
+- **Listbox estilizada**: Cards por item para melhor hierarquia visual
+- **Tipografia e espaçamento**: Aprimoramentos gerais em todas as páginas
+
+---
+
 ## [1.0.1] - 2026-03-31
 
 ### ✨ Novas Funcionalidades
