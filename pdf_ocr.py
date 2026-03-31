@@ -627,6 +627,12 @@ class PDFOcrApp(tk.Tk):
         self.compress_format     = tk.StringVar(
             value=self._IMG_FORMATS[0][0])
 
+        # ── Split ────────────────────────────────────────────
+        self._split_pdf_path = ""
+        self._split_total_pages = 0
+        self._split_running = False
+        self._split_intervals = []
+
         # ── Geral ────────────────────────────────────────────
         self.auto_update_var = tk.BooleanVar(value=True)
         self.update_status   = tk.StringVar(value="")
@@ -741,7 +747,7 @@ class PDFOcrApp(tk.Tk):
 
         self._build_ocr_page()
         self._build_compress_page()
-        self._build_coming_soon_page("split")
+        self._build_split_page()
         self._build_coming_soon_page("merge")
         self._build_about_page()
 
@@ -1255,6 +1261,130 @@ class PDFOcrApp(tk.Tk):
                  text="Esta funcionalidade está em desenvolvimento\ne será disponibilizada em uma próxima versão.",
                  font=("Segoe UI", 9), bg=C["panel"],
                  fg=C["fg_dim"], justify="center").pack(pady=(16, 0))
+
+    def _build_split_page(self):
+        page = tk.Frame(self._pages, bg=C["bg"])
+        self._page_frames["split"] = page
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, weight=1)
+
+        card = tk.Frame(page, bg=C["panel"],
+                        highlightthickness=1,
+                        highlightbackground=C["border"])
+        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.columnconfigure(0, weight=1)
+
+        inner = tk.Frame(card, bg=C["panel"], padx=20, pady=16)
+        inner.pack(fill="both", expand=True)
+        inner.columnconfigure(0, weight=1)
+
+        # ── Seleção de arquivo ──────────────────────────────────
+        file_f = tk.Frame(inner, bg=C["panel"])
+        file_f.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        _flat_btn(file_f, "+ Selecionar PDF", self._split_select_file,
+                  padx=10, pady=3).pack(side="left")
+        self._split_file_lbl = tk.Label(
+            file_f, text="Nenhum arquivo selecionado",
+            font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"])
+        self._split_file_lbl.pack(side="left", padx=(10, 0))
+
+        tk.Frame(inner, bg=C["border"], height=1).grid(row=1, column=0, sticky="ew", pady=(0, 12))
+
+        # ── Modo de divisão ──────────────────────────────────────
+        tk.Label(inner, text="Modo de divisão",
+                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
+                 fg=C["fg"]).grid(row=2, column=0, sticky="w", pady=(0, 8))
+
+        self._split_mode = tk.StringVar(value="single")
+        modes_f = tk.Frame(inner, bg=C["panel"])
+        modes_f.grid(row=3, column=0, sticky="ew", pady=(0, 12))
+
+        for val, label in [("single", "Intervalo único"),
+                           ("multi",  "Múltiplos intervalos"),
+                           ("all",    "Todas as páginas individualmente")]:
+            tk.Radiobutton(
+                modes_f, text=label, variable=self._split_mode,
+                value=val, command=self._split_update_mode_ui,
+                bg=C["panel"], fg=C["fg"],
+                selectcolor=C["input"],
+                activebackground=C["panel"], activeforeground=C["accent"],
+                font=("Segoe UI", 9),
+            ).pack(side="left", padx=(0, 20))
+
+        # ── Painel modo único ────────────────────────────────────
+        self._split_single_f = tk.Frame(inner, bg=C["panel"])
+        self._split_single_f.grid(row=4, column=0, sticky="ew", pady=(0, 8))
+        tk.Label(self._split_single_f, text="De:", font=("Segoe UI", 9),
+                 bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
+        self._split_from = tk.StringVar(value="1")
+        e_from = tk.Entry(self._split_single_f, textvariable=self._split_from,
+                          width=5, font=("Segoe UI", 9))
+        _style_entry(e_from)
+        e_from.pack(side="left", ipady=3, padx=(4, 12))
+        tk.Label(self._split_single_f, text="Até:", font=("Segoe UI", 9),
+                 bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
+        self._split_to = tk.StringVar(value="1")
+        e_to = tk.Entry(self._split_single_f, textvariable=self._split_to,
+                        width=5, font=("Segoe UI", 9))
+        _style_entry(e_to)
+        e_to.pack(side="left", ipady=3, padx=(4, 0))
+
+        # ── Painel múltiplos intervalos ──────────────────────────
+        self._split_multi_f = tk.Frame(inner, bg=C["panel"])
+        self._split_multi_f.grid(row=4, column=0, sticky="ew", pady=(0, 8))
+        self._split_multi_f.grid_remove()  # oculto inicialmente
+
+        # campo de texto livre
+        text_f = tk.Frame(self._split_multi_f, bg=C["panel"])
+        text_f.pack(fill="x", pady=(0, 6))
+        tk.Label(text_f, text="Intervalos (ex: 1-3, 5-8, 10):",
+                 font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
+        self._split_text_intervals = tk.StringVar()
+        e_text = tk.Entry(text_f, textvariable=self._split_text_intervals,
+                          width=30, font=("Segoe UI", 9))
+        _style_entry(e_text)
+        e_text.pack(side="left", ipady=3, padx=(8, 0))
+
+        # lista visual de intervalos
+        self._split_rows_f = tk.Frame(self._split_multi_f, bg=C["panel"])
+        self._split_rows_f.pack(fill="x", pady=(0, 6))
+
+        _flat_btn(self._split_multi_f, "+ Adicionar intervalo",
+                  self._split_add_interval_row, padx=8, pady=2).pack(anchor="w")
+
+        # ── Destino ──────────────────────────────────────────────
+        tk.Frame(inner, bg=C["border"], height=1).grid(row=5, column=0, sticky="ew", pady=(4, 10))
+
+        dest_f = tk.Frame(inner, bg=C["panel"])
+        dest_f.grid(row=6, column=0, sticky="ew", pady=(0, 12))
+        self._split_same_dir = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            dest_f, text="Salvar na mesma pasta do arquivo original",
+            variable=self._split_same_dir,
+            bg=C["panel"], fg=C["fg"],
+            selectcolor=C["input"],
+            activebackground=C["panel"], activeforeground=C["accent"],
+            font=("Segoe UI", 9),
+        ).pack(side="left")
+
+        # ── Progresso e botão ────────────────────────────────────
+        self._split_status = tk.StringVar(value="Selecione um PDF para dividir.")
+        tk.Label(inner, textvariable=self._split_status,
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"], anchor="w").grid(row=7, column=0, sticky="ew", pady=(0, 4))
+
+        self._split_pb = CanvasProgressBar(inner, height=6)
+        self._split_pb.grid(row=8, column=0, sticky="ew", pady=(0, 10))
+
+        btn_f = tk.Frame(inner, bg=C["panel"])
+        btn_f.grid(row=9, column=0, sticky="w")
+        self.btn_split = _accent_btn(
+            btn_f, text="  \u229f  Dividir PDF  ",
+            command=self._start_split,
+            font=("Segoe UI", 10, "bold"),
+            padx=18, pady=9,
+        )
+        self.btn_split.pack(side="left")
 
     # ── Página Sobre ──────────────────────────────────────────
 
