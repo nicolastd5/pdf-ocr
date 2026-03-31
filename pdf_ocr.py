@@ -18,19 +18,17 @@ import urllib.error
 import tempfile
 import subprocess
 import shutil
+import io
 
-try:
-    import pytesseract
-    from PIL import Image, ImageFilter, ImageEnhance, ImageOps, ImageTk
-    from pdf2image import convert_from_path
-    import reportlab.pdfgen.canvas as rl_canvas
-    from reportlab.lib.utils import ImageReader
-    import PyPDF2
-    import io
-    DEPS_OK = True
-except ImportError as e:
-    DEPS_OK = False
-    MISSING_DEP = str(e)
+# ── Lazy-loaded heavy deps (loaded in background at startup) ──
+pytesseract = None
+Image = ImageFilter = ImageEnhance = ImageOps = ImageTk = None
+convert_from_path = None
+rl_canvas = None
+ImageReader = None
+PyPDF2 = None
+DEPS_OK = None          # None = not yet loaded; True/False = result
+MISSING_DEP = ""
 
 APP_VERSION = "1.0.0"
 GITHUB_USER = "nicolastd5"
@@ -59,6 +57,116 @@ C = {
     "error":     "#f44747",
     "sel":       "#094771",
 }
+
+
+# ─────────────────────────────────────────────────────────────
+#  Carregamento lazy de dependências pesadas
+# ─────────────────────────────────────────────────────────────
+
+def _load_heavy_deps():
+    """Importa bibliotecas pesadas. Chamado em background thread."""
+    global pytesseract, Image, ImageFilter, ImageEnhance, ImageOps, ImageTk
+    global convert_from_path, rl_canvas, ImageReader, PyPDF2
+    global DEPS_OK, MISSING_DEP
+    try:
+        import pytesseract as _pytesseract
+        from PIL import (Image as _Image, ImageFilter as _ImageFilter,
+                         ImageEnhance as _ImageEnhance, ImageOps as _ImageOps,
+                         ImageTk as _ImageTk)
+        from pdf2image import convert_from_path as _convert_from_path
+        import reportlab.pdfgen.canvas as _rl_canvas
+        from reportlab.lib.utils import ImageReader as _ImageReader
+        import PyPDF2 as _PyPDF2
+
+        pytesseract = _pytesseract
+        Image = _Image
+        ImageFilter = _ImageFilter
+        ImageEnhance = _ImageEnhance
+        ImageOps = _ImageOps
+        ImageTk = _ImageTk
+        convert_from_path = _convert_from_path
+        rl_canvas = _rl_canvas
+        ImageReader = _ImageReader
+        PyPDF2 = _PyPDF2
+        DEPS_OK = True
+    except ImportError as e:
+        DEPS_OK = False
+        MISSING_DEP = str(e)
+
+
+# ─────────────────────────────────────────────────────────────
+#  Splash Screen
+# ─────────────────────────────────────────────────────────────
+
+class SplashScreen(tk.Tk):
+    """Janela de splash exibida enquanto as dependências carregam."""
+
+    def __init__(self):
+        super().__init__()
+        self.overrideredirect(True)
+        self.configure(bg="#1e1e1e")
+        self.attributes("-topmost", True)
+
+        w, h = 360, 200
+        sx = self.winfo_screenwidth()  // 2 - w // 2
+        sy = self.winfo_screenheight() // 2 - h // 2
+        self.geometry(f"{w}x{h}+{sx}+{sy}")
+
+        # Borda sutil
+        border = tk.Frame(self, bg="#454545", padx=1, pady=1)
+        border.pack(fill="both", expand=True)
+        inner = tk.Frame(border, bg="#1e1e1e")
+        inner.pack(fill="both", expand=True)
+
+        tk.Label(inner, text="⬡",
+                 font=("Segoe UI", 32), bg="#1e1e1e",
+                 fg="#4fc3f7").pack(pady=(24, 4))
+        tk.Label(inner, text="PDF Tools",
+                 font=("Segoe UI", 16, "bold"), bg="#1e1e1e",
+                 fg="#ffffff").pack()
+        tk.Label(inner, text=f"v{APP_VERSION}",
+                 font=("Segoe UI", 9), bg="#1e1e1e",
+                 fg="#858585").pack(pady=(2, 0))
+
+        self._dots = 0
+        self._load_lbl = tk.Label(inner, text="Carregando",
+                                  font=("Segoe UI", 9), bg="#1e1e1e",
+                                  fg="#858585")
+        self._load_lbl.pack(pady=(16, 0))
+
+        # Barra de progresso simples
+        self._bar = tk.Canvas(inner, height=3, bg="#3c3c3c",
+                              highlightthickness=0)
+        self._bar.pack(fill="x", padx=40, pady=(8, 0))
+        self._bar_fill = self._bar.create_rectangle(0, 0, 0, 3, fill="#4fc3f7", outline="")
+
+        self._ready = False
+        self._animate()
+        self._start_loading()
+
+    def _animate(self):
+        if self._ready:
+            return
+        self._dots = (self._dots + 1) % 4
+        self._load_lbl.config(text="Carregando" + "." * self._dots)
+        # Pulse the progress bar
+        self.update_idletasks()
+        bar_w = self._bar.winfo_width()
+        if bar_w > 10:
+            fill_w = int(bar_w * 0.4)
+            cycle = (self._dots * bar_w // 3) % max(bar_w - fill_w, 1)
+            self._bar.coords(self._bar_fill, cycle, 0, cycle + fill_w, 3)
+        self.after(350, self._animate)
+
+    def _start_loading(self):
+        def _worker():
+            _load_heavy_deps()
+            self.after(0, self._on_loaded)
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_loaded(self):
+        self._ready = True
+        self.destroy()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -2575,5 +2683,7 @@ class PDFOcrApp(tk.Tk):
 
 
 if __name__ == "__main__":
+    splash = SplashScreen()
+    splash.mainloop()
     app = PDFOcrApp()
     app.mainloop()
