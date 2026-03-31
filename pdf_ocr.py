@@ -1107,59 +1107,56 @@ class PDFOcrApp(tk.Tk):
                              dpi=150, jpeg_q=65,
                              img_fmt="JPEG", tmp_suffix=".jpg"):
         """Comprime um único arquivo. Retorna (orig_kb, new_kb) ou levanta exceção."""
-        tmp_files = []
-        try:
-            poppler_path = find_poppler()
-            pages = convert_from_path(input_pdf, dpi=dpi,
-                                      poppler_path=poppler_path)
-            total_pages = len(pages)
-            page_buffers = []
+        poppler_path = find_poppler()
 
-            for pi, pil_img in enumerate(pages, 1):
-                base_pct = (fi - 1) / total_files * 100
-                page_pct = pi / total_pages * (100 / total_files)
-                self.after(0, lambda m=f"[{fi}/{total_files}] "
-                           f"{os.path.basename(input_pdf)} "
-                           f"— página {pi}/{total_pages}":
-                           self.compress_status.set(m))
+        # Count pages first (lightweight)
+        with open(input_pdf, "rb") as fh:
+            total_pages = len(PyPDF2.PdfReader(fh).pages)
 
-                img_w, img_h = pil_img.size
-                tf = tempfile.NamedTemporaryFile(
-                    suffix=tmp_suffix, delete=False)
-                tmp_files.append(tf.name)
+        merger = PyPDF2.PdfWriter()
 
-                img_rgb = pil_img.convert("RGB")
-                if img_fmt == "JPEG":
-                    img_rgb.save(tf, format="JPEG", quality=jpeg_q,
-                                 optimize=True, progressive=True)
-                else:  # PNG
-                    img_rgb.save(tf, format="PNG",
-                                 compress_level=9, optimize=True)
-                tf.close()
+        for pi in range(1, total_pages + 1):
+            base_pct = (fi - 1) / total_files * 100
+            page_pct = pi / total_pages * (100 / total_files)
+            self.after(0, lambda m=f"[{fi}/{total_files}] "
+                       f"{os.path.basename(input_pdf)} "
+                       f"— página {pi}/{total_pages}":
+                       self.compress_status.set(m))
 
-                buf = io.BytesIO()
-                c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
-                c.drawImage(tf.name, 0, 0, width=img_w, height=img_h)
-                c.save()
-                page_buffers.append(buf.getvalue())
+            # Convert one page at a time to save memory
+            page_imgs = convert_from_path(
+                input_pdf, dpi=dpi, poppler_path=poppler_path,
+                first_page=pi, last_page=pi)
+            pil_img = page_imgs[0]
+            img_w, img_h = pil_img.size
 
-                pct = base_pct + page_pct * 0.95
-                self.after(0, lambda p=pct: self.compress_pb.set(p))
+            # Compress image directly to BytesIO (no temp files)
+            img_buf = io.BytesIO()
+            img_rgb = pil_img.convert("RGB")
+            if img_fmt == "JPEG":
+                img_rgb.save(img_buf, format="JPEG", quality=jpeg_q,
+                             optimize=True, progressive=True)
+            else:  # PNG
+                img_rgb.save(img_buf, format="PNG",
+                             compress_level=9, optimize=True)
+            img_buf.seek(0)
+            del pil_img, page_imgs, img_rgb  # free memory
 
-            merger = PyPDF2.PdfWriter()
-            for pb in page_buffers:
-                merger.add_page(PyPDF2.PdfReader(io.BytesIO(pb)).pages[0])
-            with open(output_pdf, "wb") as f:
-                merger.write(f)
+            buf = io.BytesIO()
+            c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
+            c.drawImage(ImageReader(img_buf), 0, 0, width=img_w, height=img_h)
+            c.save()
 
-            return os.path.getsize(input_pdf) // 1024, \
-                   os.path.getsize(output_pdf) // 1024
-        finally:
-            for f in tmp_files:
-                try:
-                    os.unlink(f)
-                except Exception:
-                    pass
+            merger.add_page(PyPDF2.PdfReader(io.BytesIO(buf.getvalue())).pages[0])
+
+            pct = base_pct + page_pct * 0.95
+            self.after(0, lambda p=pct: self.compress_pb.set(p))
+
+        with open(output_pdf, "wb") as f:
+            merger.write(f)
+
+        return os.path.getsize(input_pdf) // 1024, \
+               os.path.getsize(output_pdf) // 1024
 
     def _run_compress_batch(self, files, outdir,
                             dpi=150, jpeg_q=65,
@@ -1481,32 +1478,33 @@ class PDFOcrApp(tk.Tk):
 
     def _run_split(self, input_pdf, intervals, out_dir):
         try:
-            reader = PyPDF2.PdfReader(input_pdf)
             base = os.path.splitext(os.path.basename(input_pdf))[0]
             dest = out_dir if out_dir else os.path.dirname(input_pdf)
             total = len(intervals)
             generated = []
 
-            for i, (f, t) in enumerate(intervals):
-                writer = PyPDF2.PdfWriter()
-                for p in range(f, t + 1):
-                    writer.add_page(reader.pages[p])
-                if f == t:
-                    out_name = f"{base}_p{f + 1}.pdf"
-                else:
-                    out_name = f"{base}_p{f + 1}-{t + 1}.pdf"
-                out_path = os.path.join(dest, out_name)
-                with open(out_path, "wb") as fh:
-                    writer.write(fh)
-                generated.append(out_path)
-                progress = (i + 1) / total
-                self.after(0, lambda v=progress: self._split_pb.set(v))
-                self.after(0, lambda n=i+1, tot=total: self._split_status.set(
-                    f"Processando... {n}/{tot}"))
+            with open(input_pdf, "rb") as fh:
+                reader = PyPDF2.PdfReader(fh)
+                for i, (f, t) in enumerate(intervals):
+                    writer = PyPDF2.PdfWriter()
+                    for p in range(f, t + 1):
+                        writer.add_page(reader.pages[p])
+                    if f == t:
+                        out_name = f"{base}_p{f + 1}.pdf"
+                    else:
+                        out_name = f"{base}_p{f + 1}-{t + 1}.pdf"
+                    out_path = os.path.join(dest, out_name)
+                    with open(out_path, "wb") as out_fh:
+                        writer.write(out_fh)
+                    generated.append(out_path)
+                    pct = (i + 1) / total * 100
+                    self.after(0, lambda v=pct: self._split_pb.set(v))
+                    self.after(0, lambda n=i+1, tot=total: self._split_status.set(
+                        f"Processando... {n}/{tot}"))
 
             self.after(0, lambda: self._split_status.set(
                 f"{len(generated)} arquivo(s) gerado(s) em: {dest}"))
-            self.after(0, lambda: self._split_pb.set(1.0))
+            self.after(0, lambda: self._split_pb.set(100))
         except Exception as e:
             self.after(0, lambda: messagebox.showerror("Erro ao dividir", str(e)))
             self.after(0, lambda: self._split_status.set("Erro ao dividir o PDF."))
@@ -1777,8 +1775,8 @@ class PDFOcrApp(tk.Tk):
                 total = len(files)
                 for i, f in enumerate(files):
                     merger.append(f)
-                    progress = (i + 1) / total
-                    self.after(0, lambda v=progress: self._merge_pb.set(v))
+                    pct = (i + 1) / total * 100
+                    self.after(0, lambda v=pct: self._merge_pb.set(v))
                     self.after(0, lambda n=i+1, tot=total: self._merge_status.set(
                         f"Processando... {n}/{tot}"))
 
@@ -1790,7 +1788,7 @@ class PDFOcrApp(tk.Tk):
                     n_pages = len(reader.pages)
                 self.after(0, lambda: self._merge_status.set(
                     f"PDF gerado: {os.path.basename(out_path)}  ({n_pages} páginas)  →  {os.path.dirname(out_path)}"))
-                self.after(0, lambda: self._merge_pb.set(1.0))
+                self.after(0, lambda: self._merge_pb.set(100))
             finally:
                 merger.close()
         except Exception as e:
@@ -1806,8 +1804,47 @@ class PDFOcrApp(tk.Tk):
         page = tk.Frame(self._pages, bg=C["bg"])
         self._page_frames["about"] = page
 
+        # ── Scrollable wrapper ────────────────────────────────────
+        canvas = tk.Canvas(page, bg=C["bg"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(page, orient="vertical", command=canvas.yview,
+                                  style="Dark.Vertical.TScrollbar")
+        scroll_frame = tk.Frame(canvas, bg=C["bg"])
+
+        scroll_frame.bind("<Configure>",
+                          lambda _: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas_win = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Make inner frame follow canvas width
+        def _resize_scroll(event):
+            canvas.itemconfigure(canvas_win, width=event.width)
+        canvas.bind("<Configure>", _resize_scroll)
+
+        # Mousewheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        def _on_linux_scroll_up(event):
+            canvas.yview_scroll(-3, "units")
+        def _on_linux_scroll_down(event):
+            canvas.yview_scroll(3, "units")
+
+        def _bind_wheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            canvas.bind_all("<Button-4>", _on_linux_scroll_up)
+            canvas.bind_all("<Button-5>", _on_linux_scroll_down)
+        def _unbind_wheel(event):
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+
+        canvas.bind("<Enter>", _bind_wheel)
+        canvas.bind("<Leave>", _unbind_wheel)
+
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
         # card info
-        card = tk.Frame(page, bg=C["panel"],
+        card = tk.Frame(scroll_frame, bg=C["panel"],
                         highlightthickness=1,
                         highlightbackground=C["border"])
         card.pack(fill="x", padx=24, pady=20)
@@ -1881,7 +1918,7 @@ class PDFOcrApp(tk.Tk):
                  fg=C["fg_dim"]).pack(side="left")
 
         # card atualização
-        upd_card = tk.Frame(page, bg=C["panel"],
+        upd_card = tk.Frame(scroll_frame, bg=C["panel"],
                             highlightthickness=1,
                             highlightbackground=C["border"])
         upd_card.pack(fill="x", padx=24)
@@ -2149,15 +2186,15 @@ class PDFOcrApp(tk.Tk):
     def _run_ocr_single(self, input_pdf, output_pdf, lang,
                         highlight_names, fi, total_files):
         """Processa um único PDF. Levanta exceção em caso de erro."""
-        self._spinner_status(
-            f"[{fi}/{total_files}] Convertendo para imagem...")
         poppler_path = find_poppler()
-        pages = convert_from_path(input_pdf, dpi=300,
-                                  poppler_path=poppler_path)
-        total_pages = len(pages)
-        page_buffers = []
 
-        for pi, pil_img in enumerate(pages, 1):
+        # Count pages first (lightweight — no image conversion)
+        with open(input_pdf, "rb") as fh:
+            total_pages = len(PyPDF2.PdfReader(fh).pages)
+
+        merger = PyPDF2.PdfWriter()
+
+        for pi in range(1, total_pages + 1):
             self._spinner_status(
                 f"[{fi}/{total_files}] OCR — "
                 f"{os.path.basename(input_pdf)}")
@@ -2165,6 +2202,12 @@ class PDFOcrApp(tk.Tk):
             self._set_status(
                 f"[{fi}/{total_files}] {os.path.basename(input_pdf)} "
                 f"— página {pi}/{total_pages}")
+
+            # Convert one page at a time to save memory
+            page_imgs = convert_from_path(
+                input_pdf, dpi=300, poppler_path=poppler_path,
+                first_page=pi, last_page=pi)
+            pil_img = page_imgs[0]
 
             ocr_data = pytesseract.image_to_data(
                 pil_img, lang=lang,
@@ -2175,6 +2218,7 @@ class PDFOcrApp(tk.Tk):
             c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
             c.drawImage(ImageReader(pil_img), 0, 0,
                         width=img_w, height=img_h)
+            del pil_img, page_imgs  # free memory immediately
 
             if highlight_names:
                 name_boxes = self._detect_names(ocr_data)
@@ -2214,9 +2258,9 @@ class PDFOcrApp(tk.Tk):
                     pass
 
             c.save()
-            page_buffers.append(buf.getvalue())
+            merger.add_page(PyPDF2.PdfReader(io.BytesIO(buf.getvalue())).pages[0])
 
-            # Progresso global: (arquivo concluído) + (páginas do arquivo atual)
+            # Progresso global
             base_pct = (fi - 1) / total_files * 95
             page_pct = pi / total_pages * (95 / total_files)
             pct = base_pct + page_pct
@@ -2225,9 +2269,6 @@ class PDFOcrApp(tk.Tk):
 
         self._spinner_status(
             f"[{fi}/{total_files}] Gerando PDF...")
-        merger = PyPDF2.PdfWriter()
-        for pb in page_buffers:
-            merger.add_page(PyPDF2.PdfReader(io.BytesIO(pb)).pages[0])
         with open(output_pdf, "wb") as f:
             merger.write(f)
 
@@ -2238,10 +2279,10 @@ class PDFOcrApp(tk.Tk):
         com comprimento mínimo de 2 caracteres e apenas letras/hífen.
         Conectores comuns em nomes (de, da, do, etc.) são permitidos no meio.
         """
-        _CONNECTORS = {"de", "da", "do", "das", "dos", "e", "von", "van", "del", "di"}
-        _SKIP = {"Rua", "Av", "Avenida", "Dr", "Prof", "Sr", "Sra", "Mês", "Janeiro",
+        _CONNECTORS = frozenset({"de", "da", "do", "das", "dos", "e", "von", "van", "del", "di"})
+        _SKIP = frozenset({"Rua", "Av", "Avenida", "Dr", "Prof", "Sr", "Sra", "Mês", "Janeiro",
                  "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto",
-                 "Setembro", "Outubro", "Novembro", "Dezembro"}
+                 "Setembro", "Outubro", "Novembro", "Dezembro"})
 
         names = []
         n = len(ocr_data["text"])
