@@ -1826,24 +1826,26 @@ class PDFOcrApp(tk.Tk):
     def _run_merge(self, files, out_path):
         try:
             merger = PyPDF2.PdfMerger()
-            total = len(files)
-            for i, f in enumerate(files):
-                merger.append(f)
-                progress = (i + 1) / total
-                self.after(0, lambda v=progress: self._merge_pb.set(v))
-                self.after(0, lambda n=i+1, tot=total: self._merge_status.set(
-                    f"Processando... {n}/{tot}"))
+            try:
+                total = len(files)
+                for i, f in enumerate(files):
+                    merger.append(f)
+                    progress = (i + 1) / total
+                    self.after(0, lambda v=progress: self._merge_pb.set(v))
+                    self.after(0, lambda n=i+1, tot=total: self._merge_status.set(
+                        f"Processando... {n}/{tot}"))
 
-            with open(out_path, "wb") as fh:
-                merger.write(fh)
-            merger.close()
+                with open(out_path, "wb") as fh:
+                    merger.write(fh)
 
-            with open(out_path, "rb") as fh:
-                reader = PyPDF2.PdfReader(fh)
-                n_pages = len(reader.pages)
-            self.after(0, lambda: self._merge_status.set(
-                f"PDF gerado: {os.path.basename(out_path)}  ({n_pages} páginas)  →  {os.path.dirname(out_path)}"))
-            self.after(0, lambda: self._merge_pb.set(1.0))
+                with open(out_path, "rb") as fh:
+                    reader = PyPDF2.PdfReader(fh)
+                    n_pages = len(reader.pages)
+                self.after(0, lambda: self._merge_status.set(
+                    f"PDF gerado: {os.path.basename(out_path)}  ({n_pages} páginas)  →  {os.path.dirname(out_path)}"))
+                self.after(0, lambda: self._merge_pb.set(1.0))
+            finally:
+                merger.close()
         except Exception as e:
             self.after(0, lambda: messagebox.showerror("Erro ao juntar", str(e)))
             self.after(0, lambda: self._merge_status.set("Erro ao juntar os PDFs."))
