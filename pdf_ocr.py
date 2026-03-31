@@ -1915,13 +1915,10 @@ class PDFOcrApp(tk.Tk):
         )
         self.btn_update.pack(anchor="w", pady=(12, 0))
 
-        # card changelog
-        cl_card = tk.Frame(page, bg=C["panel"],
-                           highlightthickness=1,
-                           highlightbackground=C["border"])
-        cl_card.pack(fill="x", padx=24, pady=(12, 0))
+        # changelog section
+        tk.Frame(inner, bg=C["border"], height=1).pack(fill="x", pady=(12, 0))
 
-        cl_inner = tk.Frame(cl_card, bg=C["panel"], padx=20, pady=16)
+        cl_inner = tk.Frame(inner, bg=C["panel"], pady=12)
         cl_inner.pack(fill="x")
 
         tk.Label(cl_inner, text="O que há de novo — v1.0.0",
@@ -1948,7 +1945,7 @@ class PDFOcrApp(tk.Tk):
             row_f = tk.Frame(cl_f, bg=C["panel"])
             row_f.pack(anchor="w", pady=(0, 8))
             tk.Label(row_f, text=icon,
-                     font=("Segoe UI", 12), bg=C["panel"],
+                     font=("Segoe UI", 14), bg=C["panel"],
                      fg=C["accent"], width=3).pack(side="left", anchor="n")
             txt_f = tk.Frame(row_f, bg=C["panel"])
             txt_f.pack(side="left", anchor="w")
