@@ -38,24 +38,30 @@ GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases
 
 
 # ─────────────────────────────────────────────────────────────
-#  Paleta VS Code Dark
+#  Paleta Ocean / Teal
 # ─────────────────────────────────────────────────────────────
 C = {
     "bg":        "#1e1e1e",
-    "panel":     "#252526",
-    "sidebar":   "#333333",
-    "input":     "#3c3c3c",
-    "hover":     "#2a2d2e",
-    "border":    "#454545",
-    "accent":    "#4fc3f7",
-    "accent_dk": "#0288d1",
-    "fg":        "#d4d4d4",
-    "fg_dim":    "#858585",
-    "fg_bright": "#ffffff",
-    "success":   "#4ec9b0",
-    "warn":      "#dcdcaa",
-    "error":     "#f44747",
-    "sel":       "#094771",
+    "panel":     "#1a2332",
+    "sidebar":   "#141c27",
+    "sidebar_x": "#1a2536",      # sidebar expandida
+    "input":     "#1e293b",
+    "hover":     "#0f2a3d",
+    "border":    "#1e3a4f",
+    "accent":    "#2dd4bf",
+    "accent2":   "#38bdf8",
+    "accent_dk": "#0d9488",
+    "grad_start":"#2dd4bf",
+    "grad_end":  "#38bdf8",
+    "fg":        "#e2e8f0",
+    "fg_dim":    "#64748b",
+    "fg_bright": "#f8fafc",
+    "success":   "#34d399",
+    "warn":      "#fbbf24",
+    "error":     "#f87171",
+    "sel":       "#164e63",
+    "glass":     "#1a233280",    # for reference only (tkinter can't do alpha)
+    "glow":      "#2dd4bf",
 }
 
 
@@ -281,12 +287,12 @@ def fetch_latest_release():
 # ─────────────────────────────────────────────────────────────
 
 def _style_entry(e):
-    """Aplica estilo dark num tk.Entry."""
+    """Aplica estilo dark com glow teal no focus."""
     e.configure(
         bg=C["input"], fg=C["fg"],
-        insertbackground=C["fg"],
+        insertbackground=C["accent"],
         relief="flat",
-        highlightthickness=1,
+        highlightthickness=2,
         highlightbackground=C["border"],
         highlightcolor=C["accent"],
         readonlybackground=C["input"],
@@ -297,17 +303,22 @@ def _style_entry(e):
 
 def _flat_btn(parent, text, command, fg=None, bg=None, font=None, **kw):
     fg   = fg   or C["fg"]
-    bg   = bg   or C["hover"]
+    bg   = bg   or C["input"]
     font = font or ("Segoe UI", 9)
     btn = tk.Button(
         parent, text=text, command=command,
         bg=bg, fg=fg, activebackground=C["sel"],
         activeforeground=C["fg_bright"],
         relief="flat", bd=0, cursor="hand2",
-        font=font, **kw
+        font=font,
+        highlightthickness=1,
+        highlightbackground=C["border"],
+        highlightcolor=C["accent"],
+        **kw
     )
-    btn.bind("<Enter>", lambda _: btn.config(bg=C["sel"] if bg == C["hover"] else C["accent_dk"]))
-    btn.bind("<Leave>", lambda _: btn.config(bg=bg))
+    _hover_bg = C["sel"] if bg == C["input"] else C["accent_dk"]
+    btn.bind("<Enter>", lambda _: btn.config(bg=_hover_bg) if str(btn.cget("state")) != "disabled" else None)
+    btn.bind("<Leave>", lambda _: btn.config(bg=bg) if str(btn.cget("state")) != "disabled" else None)
     return btn
 
 
@@ -315,30 +326,62 @@ def _accent_btn(parent, text, command, font=None, **kw):
     font = font or ("Segoe UI", 10, "bold")
     btn = tk.Button(
         parent, text=text, command=command,
-        bg=C["accent"], fg=C["bg"],
-        activebackground=C["accent_dk"], activeforeground=C["fg_bright"],
+        bg=C["accent"], fg="#0f172a",
+        activebackground=C["accent2"], activeforeground="#0f172a",
         relief="flat", bd=0, cursor="hand2",
         font=font, **kw
     )
-    btn.bind("<Enter>", lambda _: btn.config(bg=C["accent_dk"]) if str(btn.cget("state")) != "disabled" else None)
+    btn.bind("<Enter>", lambda _: btn.config(bg=C["accent2"]) if str(btn.cget("state")) != "disabled" else None)
     btn.bind("<Leave>", lambda _: btn.config(bg=C["accent"]) if str(btn.cget("state")) != "disabled" else None)
     return btn
 
 
 class CanvasProgressBar(tk.Canvas):
-    """Barra de progresso customizada desenhada em Canvas."""
+    """Barra de progresso com gradiente teal→blue animado."""
+
+    _GRAD_STEPS = 20       # segmentos do gradiente
+    _SHIMMER_SPEED = 2     # pixels por frame
+    _SHIMMER_MS = 40       # intervalo de animação
 
     def __init__(self, parent, **kw):
-        kw.setdefault("height", 6)
+        kw.setdefault("height", 8)
         kw.setdefault("bg", C["panel"])
         kw.setdefault("highlightthickness", 0)
         super().__init__(parent, **kw)
         self._value = 0
+        self._shimmer_offset = 0
+        self._animating = False
+        self._after_id = None
         self.bind("<Configure>", self._redraw)
 
     def set(self, value):
         self._value = max(0.0, min(100.0, value))
         self._redraw()
+        if 0 < self._value < 100 and not self._animating:
+            self._animating = True
+            self._animate_shimmer()
+        elif self._value >= 100 or self._value <= 0:
+            self._animating = False
+            if self._after_id:
+                self.after_cancel(self._after_id)
+                self._after_id = None
+
+    @staticmethod
+    def _lerp_color(c1, c2, t):
+        """Interpola entre duas cores hex."""
+        r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
+        r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
+        r = int(r1 + (r2 - r1) * t)
+        g = int(g1 + (g2 - g1) * t)
+        b = int(b1 + (b2 - b1) * t)
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _animate_shimmer(self):
+        if not self._animating:
+            return
+        self._shimmer_offset = (self._shimmer_offset + self._SHIMMER_SPEED) % 60
+        self._redraw()
+        self._after_id = self.after(self._SHIMMER_MS, self._animate_shimmer)
 
     def _redraw(self, *_):
         w = self.winfo_width()
@@ -346,13 +389,25 @@ class CanvasProgressBar(tk.Canvas):
         if w < 2 or h < 2:
             return
         self.delete("all")
-        r = min(3, h // 2)
+        r = min(4, h // 2)
         # track
         self._rounded_rect(0, 0, w, h, r, fill=C["input"], outline="")
-        # fill
+        # gradient fill
         fill_w = int(w * self._value / 100)
         if fill_w > r:
-            self._rounded_rect(0, 0, fill_w, h, r, fill=C["accent"], outline="")
+            for i in range(self._GRAD_STEPS):
+                x1 = int(i * fill_w / self._GRAD_STEPS)
+                x2 = int((i + 1) * fill_w / self._GRAD_STEPS)
+                if x2 > fill_w:
+                    x2 = fill_w
+                t = ((i / self._GRAD_STEPS) + self._shimmer_offset / 60) % 1.0
+                color = self._lerp_color(C["grad_start"], C["grad_end"], t)
+                if i == 0:
+                    self._rounded_rect(x1, 0, x2, h, r, fill=color, outline="")
+                elif i == self._GRAD_STEPS - 1:
+                    self._rounded_rect(x1, 0, x2, h, r, fill=color, outline="")
+                else:
+                    self.create_rectangle(x1, 0, x2, h, fill=color, outline="")
 
     def _rounded_rect(self, x1, y1, x2, y2, r, **kw):
         """Draws a rounded rectangle using a smooth polygon (no pieslice artifacts)."""
@@ -378,11 +433,13 @@ class CanvasProgressBar(tk.Canvas):
 # ─────────────────────────────────────────────────────────────
 
 class SpinnerWindow(tk.Toplevel):
-    _ARC_SPAN  = 280
-    _SPEED     = 6
+    _ARC1_SPAN = 120
+    _ARC2_SPAN = 80
+    _SPEED1    = 5          # arco teal — mais lento
+    _SPEED2    = 8          # arco blue — mais rápido
     _INTERVAL  = 16
     _RADIUS    = 44
-    _THICKNESS = 8
+    _THICKNESS = 6
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -391,43 +448,53 @@ class SpinnerWindow(tk.Toplevel):
         self.configure(bg=C["panel"])
         self.overrideredirect(True)
         self.attributes("-topmost", True)
-        self._angle    = 0
+        self._angle1   = 0
+        self._angle2   = 180
         self._running  = False
         self._after_id = None
-        self.status_var = tk.StringVar(value="Iniciando OCR...")
+        self.status_var = tk.StringVar(value="Iniciando...")
         self.page_var   = tk.StringVar(value="")
         self._build()
         self._center(parent)
         self.grab_set()
 
     def _build(self):
-        # borda sutil
+        # borda glassmorphism
         outer = tk.Frame(self, bg=C["border"], padx=1, pady=1)
         outer.pack()
-        inner = tk.Frame(outer, bg=C["panel"], padx=36, pady=32)
+        inner = tk.Frame(outer, bg=C["panel"], padx=40, pady=36)
         inner.pack()
 
-        tk.Label(inner, text="Processando OCR",
-                 font=("Segoe UI", 12, "bold"),
-                 bg=C["panel"], fg=C["fg_bright"]).pack(pady=(0, 16))
+        tk.Label(inner, text="Processando",
+                 font=("Segoe UI", 13, "bold"),
+                 bg=C["panel"], fg=C["fg_bright"]).pack(pady=(0, 18))
 
-        size = self._RADIUS * 2 + self._THICKNESS * 2 + 4
+        size = self._RADIUS * 2 + self._THICKNESS * 2 + 8
         self._canvas = tk.Canvas(inner, width=size, height=size,
                                  bg=C["panel"], highlightthickness=0)
         self._canvas.pack()
         cx = cy = size // 2
         r, t = self._RADIUS, self._THICKNESS
+
+        # track sutil
         self._canvas.create_oval(cx-r, cy-r, cx+r, cy+r,
                                  outline=C["input"], width=t)
-        self._arc = self._canvas.create_arc(
+        # arco 1 — teal
+        self._arc1 = self._canvas.create_arc(
             cx-r, cy-r, cx+r, cy+r,
-            start=90, extent=-self._ARC_SPAN,
+            start=90, extent=-self._ARC1_SPAN,
             outline=C["accent"], width=t, style="arc"
+        )
+        # arco 2 — blue (mais rápido)
+        self._arc2 = self._canvas.create_arc(
+            cx-r, cy-r, cx+r, cy+r,
+            start=270, extent=-self._ARC2_SPAN,
+            outline=C["accent2"], width=t, style="arc"
         )
 
         tk.Label(inner, textvariable=self.status_var,
                  font=("Segoe UI", 10), bg=C["panel"], fg=C["fg"],
-                 wraplength=260, justify="center").pack(pady=(14, 2))
+                 wraplength=280, justify="center").pack(pady=(16, 2))
         tk.Label(inner, textvariable=self.page_var,
                  font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"]).pack()
 
@@ -466,8 +533,10 @@ class SpinnerWindow(tk.Toplevel):
     def _animate(self):
         if not self._running:
             return
-        self._angle = (self._angle + self._SPEED) % 360
-        self._canvas.itemconfigure(self._arc, start=90 - self._angle)
+        self._angle1 = (self._angle1 + self._SPEED1) % 360
+        self._angle2 = (self._angle2 + self._SPEED2) % 360
+        self._canvas.itemconfigure(self._arc1, start=90 - self._angle1)
+        self._canvas.itemconfigure(self._arc2, start=90 - self._angle2)
         self._after_id = self.after(self._INTERVAL, self._animate)
 
 
@@ -781,7 +850,7 @@ class PDFOcrApp(tk.Tk):
                      background=C["input"],
                      foreground=C["fg"],
                      fieldbackground=C["input"],
-                     arrowcolor=C["fg_dim"],
+                     arrowcolor=C["accent"],
                      bordercolor=C["border"],
                      relief="flat")
         s.map("TCombobox",
@@ -793,14 +862,17 @@ class PDFOcrApp(tk.Tk):
                      background=C["input"],
                      troughcolor=C["panel"],
                      bordercolor=C["panel"],
-                     arrowcolor=C["fg_dim"])
+                     arrowcolor=C["accent"])
         s.configure("TCheckbutton",
                      background=C["panel"],
                      foreground=C["fg"],
-                     focuscolor=C["panel"])
+                     focuscolor=C["panel"],
+                     indicatorcolor=C["input"],
+                     indicatorrelief="flat")
         s.map("TCheckbutton",
               background=[("active", C["panel"])],
-              foreground=[("active", C["fg_bright"])])
+              foreground=[("active", C["fg_bright"])],
+              indicatorcolor=[("selected", C["accent"])])
 
     # ── Thumbnail helpers ────────────────────────────────────
 
@@ -826,40 +898,63 @@ class PDFOcrApp(tk.Tk):
             self.after(0, lambda: callback(photo))
         threading.Thread(target=_worker, daemon=True).start()
 
+    # ── Sidebar constants ────────────────────────────────────────
+    _SIDEBAR_COLLAPSED = 56
+    _SIDEBAR_EXPANDED  = 180
+    _SIDEBAR_ANIM_MS   = 15      # intervalo entre frames
+    _SIDEBAR_ANIM_STEP = 12      # pixels por frame
+
     # ── Layout principal ──────────────────────────────────────
 
     def _build_ui(self):
-        # sidebar
-        self._sidebar = tk.Frame(self, bg=C["sidebar"], width=56)
+        # sidebar container — usa place para animar width
+        self._sidebar = tk.Frame(self, bg=C["sidebar"], width=self._SIDEBAR_COLLAPSED)
         self._sidebar.pack(side="left", fill="y")
         self._sidebar.pack_propagate(False)
+        self._sidebar_expanded = False
+        self._sidebar_anim_id = None
+        self._sidebar_target_w = self._SIDEBAR_COLLAPSED
 
         # cabeçalho da sidebar
-        tk.Label(self._sidebar, text="⬡",
+        self._sidebar_logo = tk.Label(self._sidebar, text="⬡",
                  font=("Segoe UI", 18), bg=C["sidebar"],
-                 fg=C["accent"]).pack(pady=(18, 2))
+                 fg=C["accent"])
+        self._sidebar_logo.pack(pady=(18, 2))
         tk.Frame(self._sidebar, bg=C["border"], height=1).pack(fill="x", padx=8, pady=6)
 
         # botões de navegação
         self._nav_btns = {}
+        self._nav_labels = {}
         self._nav_active_key = None
         for key, icon, label in self._NAV:
             f = tk.Frame(self._sidebar, bg=C["sidebar"])
             f.pack(fill="x")
+            # frame interno para ícone + texto lado a lado
+            inner = tk.Frame(f, bg=C["sidebar"])
+            inner.pack(fill="x", padx=4, pady=2)
             btn = tk.Button(
-                f, text=icon,
+                inner, text=icon,
                 font=("Segoe UI", 16),
                 bg=C["sidebar"], fg=C["fg_dim"],
                 activebackground=C["hover"],
                 activeforeground=C["accent"],
                 relief="flat", bd=0, cursor="hand2",
-                width=3, pady=10,
+                width=2, pady=8,
                 command=lambda k=key: self._show_page(k)
             )
-            btn.pack(fill="x")
-            btn.bind("<Enter>", lambda e, b=btn, k=key: b.config(fg=C["fg"]) if k != self._nav_active_key else None)
-            btn.bind("<Leave>", lambda e, b=btn, k=key: b.config(fg=C["fg_dim"]) if k != self._nav_active_key else None)
+            btn.pack(side="left")
+            lbl = tk.Label(inner, text=label,
+                           font=("Segoe UI", 10),
+                           bg=C["sidebar"], fg=C["fg_dim"],
+                           cursor="hand2")
+            lbl.bind("<Button-1>", lambda _, k=key: self._show_page(k))
+            # label starts hidden (collapsed)
             self._nav_btns[key] = btn
+            self._nav_labels[key] = lbl
+
+        # hover para expandir / retrair
+        self._sidebar.bind("<Enter>", self._sidebar_expand)
+        self._sidebar.bind("<Leave>", self._sidebar_collapse)
 
         # área de conteúdo
         self._content = tk.Frame(self, bg=C["bg"])
@@ -889,6 +984,39 @@ class PDFOcrApp(tk.Tk):
         self._build_merge_page()
         self._build_about_page()
 
+    # ── Sidebar animation ─────────────────────────────────────
+
+    def _sidebar_expand(self, _event=None):
+        self._sidebar_expanded = True
+        self._sidebar_target_w = self._SIDEBAR_EXPANDED
+        # mostrar labels
+        for key, lbl in self._nav_labels.items():
+            lbl.pack(side="left", padx=(4, 0))
+        if not self._sidebar_anim_id:
+            self._sidebar_animate()
+
+    def _sidebar_collapse(self, _event=None):
+        self._sidebar_expanded = False
+        self._sidebar_target_w = self._SIDEBAR_COLLAPSED
+        # esconder labels
+        for key, lbl in self._nav_labels.items():
+            lbl.pack_forget()
+        if not self._sidebar_anim_id:
+            self._sidebar_animate()
+
+    def _sidebar_animate(self):
+        current_w = self._sidebar.winfo_width()
+        target = self._sidebar_target_w
+        if current_w == target:
+            self._sidebar_anim_id = None
+            return
+        if current_w < target:
+            new_w = min(current_w + self._SIDEBAR_ANIM_STEP, target)
+        else:
+            new_w = max(current_w - self._SIDEBAR_ANIM_STEP, target)
+        self._sidebar.config(width=new_w)
+        self._sidebar_anim_id = self.after(self._SIDEBAR_ANIM_MS, self._sidebar_animate)
+
     def _show_page(self, key):
         if self._active_page == key:
             return
@@ -900,10 +1028,13 @@ class PDFOcrApp(tk.Tk):
 
         # atualiza destaque da sidebar
         for k, btn in self._nav_btns.items():
+            lbl = self._nav_labels[k]
             if k == key:
                 btn.config(fg=C["accent"], bg=C["hover"])
+                lbl.config(fg=C["accent"], bg=C["hover"])
             else:
                 btn.config(fg=C["fg_dim"], bg=C["sidebar"])
+                lbl.config(fg=C["fg_dim"], bg=C["sidebar"])
 
         titles = {
             "ocr":      ("OCR",        "Converta PDFs escaneados em PDFs pesquisáveis"),
@@ -924,7 +1055,7 @@ class PDFOcrApp(tk.Tk):
         page.columnconfigure(0, weight=1)
         page.rowconfigure(0, weight=1)
 
-        # card principal — expande verticalmente
+        # card principal — glassmorphism style
         card = tk.Frame(page, bg=C["panel"],
                         highlightthickness=1,
                         highlightbackground=C["border"])
@@ -934,10 +1065,10 @@ class PDFOcrApp(tk.Tk):
 
         # ── Cabeçalho da lista ────────────────────────────────
         hdr = tk.Frame(card, bg=C["panel"])
-        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 4))
+        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
         tk.Label(hdr, text="Arquivos PDF para OCR",
-                 font=("Segoe UI", 9), bg=C["panel"],
-                 fg=C["fg_dim"]).pack(side="left")
+                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
+                 fg=C["fg"]).pack(side="left")
         self._ocr_count_lbl = tk.Label(
             hdr, text="(0 arquivo)", font=("Segoe UI", 9),
             bg=C["panel"], fg=C["fg_dim"])
@@ -959,10 +1090,10 @@ class PDFOcrApp(tk.Tk):
             list_f,
             bg=C["input"], fg=C["fg"],
             selectbackground=C["sel"], selectforeground=C["fg_bright"],
-            relief="flat", highlightthickness=1,
+            relief="flat", highlightthickness=2,
             highlightbackground=C["border"],
             highlightcolor=C["accent"],
-            font=("Segoe UI", 9), activestyle="none",
+            font=("Segoe UI", 10), activestyle="none",
             selectmode="extended",
             yscrollcommand=sb_ocr.set,
         )
@@ -1060,10 +1191,10 @@ class PDFOcrApp(tk.Tk):
 
         # ── Cabeçalho ─────────────────────────────────────────
         hdr = tk.Frame(card, bg=C["panel"])
-        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 4))
+        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
         tk.Label(hdr, text="Arquivos PDF para comprimir",
-                 font=("Segoe UI", 9), bg=C["panel"],
-                 fg=C["fg_dim"]).pack(side="left")
+                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
+                 fg=C["fg"]).pack(side="left")
         self._cmp_count_lbl = tk.Label(
             hdr, text="(0 arquivo)", font=("Segoe UI", 9),
             bg=C["panel"], fg=C["fg_dim"])
@@ -1085,10 +1216,10 @@ class PDFOcrApp(tk.Tk):
             list_f,
             bg=C["input"], fg=C["fg"],
             selectbackground=C["sel"], selectforeground=C["fg_bright"],
-            relief="flat", highlightthickness=1,
+            relief="flat", highlightthickness=2,
             highlightbackground=C["border"],
             highlightcolor=C["accent"],
-            font=("Segoe UI", 9), activestyle="none",
+            font=("Segoe UI", 10), activestyle="none",
             selectmode="extended",
             yscrollcommand=sb_cmp.set,
         )
@@ -1399,6 +1530,7 @@ class PDFOcrApp(tk.Tk):
                 selectcolor=C["input"],
                 activebackground=C["panel"], activeforeground=C["accent"],
                 font=("Segoe UI", 9),
+                highlightthickness=0,
             ).pack(side="left", padx=(0, 20))
 
         # ── Painel modo único ────────────────────────────────────
@@ -1481,6 +1613,7 @@ class PDFOcrApp(tk.Tk):
             selectcolor=C["input"],
             activebackground=C["panel"], activeforeground=C["accent"],
             font=("Segoe UI", 9),
+            highlightthickness=0,
         ).pack(side="left")
 
         # ── Progresso e botão ────────────────────────────────────
@@ -1735,8 +1868,8 @@ class PDFOcrApp(tk.Tk):
         hdr = tk.Frame(inner, bg=C["panel"])
         hdr.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         tk.Label(hdr, text="PDFs para juntar",
-                 font=("Segoe UI", 9), bg=C["panel"],
-                 fg=C["fg_dim"]).pack(side="left")
+                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
+                 fg=C["fg"]).pack(side="left")
         self._merge_count_lbl = tk.Label(
             hdr, text="(0 arquivos)", font=("Segoe UI", 9),
             bg=C["panel"], fg=C["fg_dim"])
@@ -1758,10 +1891,10 @@ class PDFOcrApp(tk.Tk):
             list_f,
             bg=C["input"], fg=C["fg"],
             selectbackground=C["sel"], selectforeground=C["fg_bright"],
-            relief="flat", highlightthickness=1,
+            relief="flat", highlightthickness=2,
             highlightbackground=C["border"],
             highlightcolor=C["accent"],
-            font=("Segoe UI", 9), activestyle="none",
+            font=("Segoe UI", 10), activestyle="none",
             yscrollcommand=sb.set,
         )
         sb.config(command=self._merge_listbox.yview)
@@ -1841,6 +1974,7 @@ class PDFOcrApp(tk.Tk):
             selectcolor=C["input"],
             activebackground=C["panel"], activeforeground=C["accent"],
             font=("Segoe UI", 9),
+            highlightthickness=0,
         ).pack(side="left")
 
         # ── Progresso e botão ────────────────────────────────────
@@ -2111,7 +2245,7 @@ class PDFOcrApp(tk.Tk):
         badge_f.pack(anchor="w", pady=(4, 0))
         tk.Label(badge_f, text=f"v{APP_VERSION}",
                  font=("Segoe UI", 9, "bold"),
-                 bg=C["accent_dk"], fg=C["fg_bright"],
+                 bg=C["accent"], fg="#0f172a",
                  padx=8, pady=2).pack(side="left")
         tk.Label(badge_f, text="  MIT License",
                  font=("Segoe UI", 9),
