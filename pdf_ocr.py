@@ -1214,60 +1214,6 @@ class PDFOcrApp(tk.Tk):
 
     # ── Em breve ──────────────────────────────────────────────
 
-    def _build_coming_soon_page(self, key):
-        _ICONS  = {"split": "⊟", "merge": "⊞"}
-        _TITLES = {
-            "split": "Dividir PDF",
-            "merge": "Juntar PDF",
-        }
-        _DESCS  = {
-            "split": "Separe um PDF em partes ou páginas individuais.",
-            "merge": "Una múltiplos PDFs em um único arquivo.",
-        }
-
-        page = tk.Frame(self._pages, bg=C["bg"])
-        self._page_frames[key] = page
-
-        # Centraliza verticalmente
-        page.rowconfigure(0, weight=1)
-        page.rowconfigure(2, weight=1)
-        page.columnconfigure(0, weight=1)
-
-        card = tk.Frame(page, bg=C["panel"],
-                        highlightthickness=1,
-                        highlightbackground=C["border"])
-        card.grid(row=1, column=0, padx=60, pady=20, sticky="ew")
-
-        inner = tk.Frame(card, bg=C["panel"], padx=40, pady=36)
-        inner.pack()
-
-        tk.Label(inner, text=_ICONS[key],
-                 font=("Segoe UI", 36), bg=C["panel"],
-                 fg=C["accent"]).pack(pady=(0, 12))
-
-        tk.Label(inner, text=_TITLES[key],
-                 font=("Segoe UI", 16, "bold"),
-                 bg=C["panel"], fg=C["fg_bright"]).pack()
-
-        tk.Label(inner, text=_DESCS[key],
-                 font=("Segoe UI", 10), bg=C["panel"],
-                 fg=C["fg"], pady=6).pack()
-
-        tk.Frame(inner, bg=C["border"], height=1,
-                 width=260).pack(pady=(14, 14))
-
-        badge = tk.Frame(inner, bg=C["accent_dk"],
-                         padx=16, pady=6)
-        badge.pack()
-        tk.Label(badge, text="Em breve",
-                 font=("Segoe UI", 10, "bold"),
-                 bg=C["accent_dk"], fg=C["fg_bright"]).pack()
-
-        tk.Label(inner,
-                 text="Esta funcionalidade está em desenvolvimento\ne será disponibilizada em uma próxima versão.",
-                 font=("Segoe UI", 9), bg=C["panel"],
-                 fg=C["fg_dim"], justify="center").pack(pady=(16, 0))
-
     def _build_split_page(self):
         page = tk.Frame(self._pages, bg=C["bg"])
         self._page_frames["split"] = page
