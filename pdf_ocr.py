@@ -356,6 +356,11 @@ class CanvasProgressBar(tk.Canvas):
         self._shimmer_offset = 0
         self._animating = False
         self._after_id = None
+        # Pre-compute gradient color table for performance
+        self._grad_colors = [
+            self._lerp_color(C["grad_start"], C["grad_end"], i / self._GRAD_STEPS)
+            for i in range(self._GRAD_STEPS)
+        ]
         self.bind("<Configure>", self._redraw)
 
     def set(self, value):
@@ -399,16 +404,15 @@ class CanvasProgressBar(tk.Canvas):
         # gradient fill
         fill_w = int(w * self._value / 100)
         if fill_w > r:
-            for i in range(self._GRAD_STEPS):
-                x1 = int(i * fill_w / self._GRAD_STEPS)
-                x2 = int((i + 1) * fill_w / self._GRAD_STEPS)
+            n = self._GRAD_STEPS
+            offset = int(self._shimmer_offset / 60 * n)
+            for i in range(n):
+                x1 = int(i * fill_w / n)
+                x2 = int((i + 1) * fill_w / n)
                 if x2 > fill_w:
                     x2 = fill_w
-                t = ((i / self._GRAD_STEPS) + self._shimmer_offset / 60) % 1.0
-                color = self._lerp_color(C["grad_start"], C["grad_end"], t)
-                if i == 0:
-                    self._rounded_rect(x1, 0, x2, h, r, fill=color, outline="")
-                elif i == self._GRAD_STEPS - 1:
+                color = self._grad_colors[(i + offset) % n]
+                if i == 0 or i == n - 1:
                     self._rounded_rect(x1, 0, x2, h, r, fill=color, outline="")
                 else:
                     self.create_rectangle(x1, 0, x2, h, fill=color, outline="")
@@ -642,7 +646,6 @@ class UpdateDialog(tk.Toplevel):
         except Exception:
             pass
         self.destroy()
-        messagebox.showerror("Falha no download", msg, parent=self)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1260,48 +1263,53 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             total_pages = len(PyPDF2.PdfReader(fh).pages)
 
         merger = PyPDF2.PdfWriter()
+        try:
+            for pi in range(1, total_pages + 1):
+                base_pct = (fi - 1) / total_files * 100
+                page_pct = pi / total_pages * (100 / total_files)
+                msg = (f"[{fi}/{total_files}] "
+                       f"{os.path.basename(input_pdf)} "
+                       f"— página {pi}/{total_pages}")
+                self.after(0, lambda m=msg: self.compress_status.set(m))
+                self._spinner_status(os.path.basename(input_pdf))
+                self._spinner_page(pi, total_pages)
 
-        for pi in range(1, total_pages + 1):
-            base_pct = (fi - 1) / total_files * 100
-            page_pct = pi / total_pages * (100 / total_files)
-            msg = (f"[{fi}/{total_files}] "
-                   f"{os.path.basename(input_pdf)} "
-                   f"— página {pi}/{total_pages}")
-            self.after(0, lambda m=msg: self.compress_status.set(m))
-            self._spinner_status(f"{os.path.basename(input_pdf)}")
-            self._spinner_page(pi, total_pages)
+                # Convert one page at a time to save memory
+                page_imgs = convert_from_path(
+                    input_pdf, dpi=dpi, poppler_path=poppler_path,
+                    first_page=pi, last_page=pi)
+                pil_img = page_imgs[0]
+                img_w, img_h = pil_img.size
 
-            # Convert one page at a time to save memory
-            page_imgs = convert_from_path(
-                input_pdf, dpi=dpi, poppler_path=poppler_path,
-                first_page=pi, last_page=pi)
-            pil_img = page_imgs[0]
-            img_w, img_h = pil_img.size
+                # Compress image directly to BytesIO (no temp files)
+                img_buf = io.BytesIO()
+                img_rgb = pil_img.convert("RGB")
+                if img_fmt == "JPEG":
+                    img_rgb.save(img_buf, format="JPEG", quality=jpeg_q,
+                                 optimize=True, progressive=True)
+                else:  # PNG
+                    img_rgb.save(img_buf, format="PNG",
+                                 compress_level=9, optimize=True)
+                img_buf.seek(0)
+                del pil_img, page_imgs, img_rgb  # free memory
 
-            # Compress image directly to BytesIO (no temp files)
-            img_buf = io.BytesIO()
-            img_rgb = pil_img.convert("RGB")
-            if img_fmt == "JPEG":
-                img_rgb.save(img_buf, format="JPEG", quality=jpeg_q,
-                             optimize=True, progressive=True)
-            else:  # PNG
-                img_rgb.save(img_buf, format="PNG",
-                             compress_level=9, optimize=True)
-            img_buf.seek(0)
-            del pil_img, page_imgs, img_rgb  # free memory
+                buf = io.BytesIO()
+                c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
+                c.drawImage(ImageReader(img_buf), 0, 0, width=img_w, height=img_h)
+                c.save()
+                img_buf.close()
 
-            buf = io.BytesIO()
-            c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
-            c.drawImage(ImageReader(img_buf), 0, 0, width=img_w, height=img_h)
-            c.save()
+                page_data = buf.getvalue()
+                buf.close()
+                merger.add_page(PyPDF2.PdfReader(io.BytesIO(page_data)).pages[0])
 
-            merger.add_page(PyPDF2.PdfReader(io.BytesIO(buf.getvalue())).pages[0])
+                pct = base_pct + page_pct * 0.95
+                self.after(0, lambda p=pct: self.compress_pb.set(p))
 
-            pct = base_pct + page_pct * 0.95
-            self.after(0, lambda p=pct: self.compress_pb.set(p))
-
-        with open(output_pdf, "wb") as f:
-            merger.write(f)
+            with open(output_pdf, "wb") as f:
+                merger.write(f)
+        finally:
+            merger.close()
 
         return os.path.getsize(input_pdf) // 1024, \
                os.path.getsize(output_pdf) // 1024
@@ -1550,9 +1558,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
     def _split_set_preview(self, photo):
         if photo:
-            self._split_preview_photo = photo  # prevent GC
+            old = self._split_preview_photo
+            self._split_preview_photo = photo
             self._split_preview_lbl.config(image=photo, text="")
+            del old  # free previous image
         else:
+            self._split_preview_photo = None
             self._split_preview_lbl.config(text="Erro ao carregar", image="")
 
     def _split_preview_prev(self):
@@ -1924,9 +1935,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
     def _merge_set_preview(self, photo):
         if photo:
-            self._merge_preview_photo = photo  # prevent GC
+            old = self._merge_preview_photo
+            self._merge_preview_photo = photo
             self._merge_preview_lbl.config(image=photo, text="")
+            del old  # free previous image
         else:
+            self._merge_preview_photo = None
             self._merge_preview_lbl.config(text="Erro ao carregar", image="")
 
     def _merge_reset_preview(self):
@@ -2278,12 +2292,15 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                 data = json.load(f)
             self.auto_update_var.set(data.get("auto_update", True))
             self.highlight_names_var.set(data.get("highlight_names", True))
+            lang = data.get("ocr_lang")
+            if lang:
+                self.lang.set(lang)
             q = data.get("compress_quality")
             if q and any(p[0] == q for p in self._QUALITY_PRESETS):
                 self.compress_quality.set(q)
-            f = data.get("compress_format")
-            if f and any(x[0] == f for x in self._IMG_FORMATS):
-                self.compress_format.set(f)
+            fmt = data.get("compress_format")
+            if fmt and any(x[0] == fmt for x in self._IMG_FORMATS):
+                self.compress_format.set(fmt)
         except Exception:
             pass
 
@@ -2293,6 +2310,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                 json.dump({
                     "auto_update":      self.auto_update_var.get(),
                     "highlight_names":  self.highlight_names_var.get(),
+                    "ocr_lang":         self.lang.get(),
                     "compress_quality": self.compress_quality.get(),
                     "compress_format":  self.compress_format.get(),
                 }, fp)
@@ -2338,6 +2356,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
     def _on_lang_select(self, _event):
         code = self.lang.get().split(" — ")[0]
         self.lang.set(code)
+        self._save_prefs()
 
     def _ocr_add_files(self):
         paths = filedialog.askopenfilenames(
@@ -2521,92 +2540,104 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         # Tesseract config: OEM 3 (best available), PSM 3 (fully automatic)
         tess_config = "--oem 3 --psm 3"
 
+        basename = os.path.basename(input_pdf)
         merger = PyPDF2.PdfWriter()
+        try:
+            for pi in range(1, total_pages + 1):
+                self._spinner_status(
+                    f"[{fi}/{total_files}] OCR — {basename}")
+                self._spinner_page(pi, total_pages)
+                self._set_status(
+                    f"[{fi}/{total_files}] {basename} "
+                    f"— página {pi}/{total_pages}")
 
-        for pi in range(1, total_pages + 1):
+                # Convert one page at a time to save memory
+                page_imgs = convert_from_path(
+                    input_pdf, dpi=300, poppler_path=poppler_path,
+                    first_page=pi, last_page=pi)
+                pil_img = page_imgs[0]
+                img_w, img_h = pil_img.size
+
+                # Preprocessar imagem para melhorar OCR
+                ocr_img = self._preprocess_for_ocr(pil_img)
+
+                ocr_data = pytesseract.image_to_data(
+                    ocr_img, lang=lang,
+                    config=tess_config,
+                    output_type=pytesseract.Output.DICT)
+                del ocr_img  # free preprocessed image
+
+                buf = io.BytesIO()
+                c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
+                # Draw original (non-preprocessed) image for visual fidelity
+                c.drawImage(ImageReader(pil_img), 0, 0,
+                            width=img_w, height=img_h)
+                del pil_img, page_imgs  # free memory immediately
+
+                if highlight_names:
+                    name_boxes = self._detect_names(ocr_data)
+                    if name_boxes:
+                        c.saveState()
+                        c.setFillColorRGB(1.0, 0.85, 0.0, alpha=0.35)
+                        for nx, ny, nw, nh in name_boxes:
+                            pad = 2
+                            c.rect(nx - pad, img_h - ny - nh - pad,
+                                   nw + pad * 2, nh + pad * 2,
+                                   fill=1, stroke=0)
+                        c.restoreState()
+
+                # Invisible text layer — minimum confidence threshold 30
+                c.setFillColorRGB(0, 0, 0, alpha=0)
+                texts = ocr_data["text"]
+                confs = ocr_data["conf"]
+                lefts = ocr_data["left"]
+                tops = ocr_data["top"]
+                widths = ocr_data["width"]
+                heights = ocr_data["height"]
+                for j in range(len(texts)):
+                    word = texts[j]
+                    if not word or not word.strip():
+                        continue
+                    try:
+                        conf = int(confs[j])
+                    except (TypeError, ValueError):
+                        continue
+                    if conf < 30:
+                        continue
+                    x, y = lefts[j], tops[j]
+                    w, h = widths[j], heights[j]
+                    if h <= 0 or w <= 0:
+                        continue
+                    font_size = max(h * 0.85, 1)
+                    try:
+                        c.setFont("Helvetica", font_size)
+                        tw = c.stringWidth(word, "Helvetica", font_size)
+                        sx = w / tw if tw > 0 else 1
+                        c.saveState()
+                        c.transform(sx, 0, 0, 1, x, img_h - y - h)
+                        c.drawString(0, 0, word)
+                        c.restoreState()
+                    except Exception:
+                        pass
+
+                c.save()
+                page_data = buf.getvalue()
+                buf.close()
+                merger.add_page(PyPDF2.PdfReader(io.BytesIO(page_data)).pages[0])
+
+                # Progresso global
+                base_pct = (fi - 1) / total_files * 95
+                page_pct = pi / total_pages * (95 / total_files)
+                pct = base_pct + page_pct
+                self.after(0, lambda p=pct: (
+                    self.progress_var.set(p), self.pb.set(p)))
+
             self._spinner_status(
-                f"[{fi}/{total_files}] OCR — "
-                f"{os.path.basename(input_pdf)}")
-            self._spinner_page(pi, total_pages)
-            self._set_status(
-                f"[{fi}/{total_files}] {os.path.basename(input_pdf)} "
-                f"— página {pi}/{total_pages}")
-
-            # Convert one page at a time to save memory
-            page_imgs = convert_from_path(
-                input_pdf, dpi=300, poppler_path=poppler_path,
-                first_page=pi, last_page=pi)
-            pil_img = page_imgs[0]
-            img_w, img_h = pil_img.size
-
-            # Preprocessar imagem para melhorar OCR
-            ocr_img = self._preprocess_for_ocr(pil_img)
-
-            ocr_data = pytesseract.image_to_data(
-                ocr_img, lang=lang,
-                config=tess_config,
-                output_type=pytesseract.Output.DICT)
-            del ocr_img  # free preprocessed image
-
-            buf = io.BytesIO()
-            c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
-            # Draw original (non-preprocessed) image for visual fidelity
-            c.drawImage(ImageReader(pil_img), 0, 0,
-                        width=img_w, height=img_h)
-            del pil_img, page_imgs  # free memory immediately
-
-            if highlight_names:
-                name_boxes = self._detect_names(ocr_data)
-                if name_boxes:
-                    c.saveState()
-                    c.setFillColorRGB(1.0, 0.85, 0.0, alpha=0.35)
-                    for nx, ny, nw, nh in name_boxes:
-                        pad = 2
-                        c.rect(nx - pad, img_h - ny - nh - pad,
-                               nw + pad * 2, nh + pad * 2,
-                               fill=1, stroke=0)
-                    c.restoreState()
-
-            # Invisible text layer — minimum confidence threshold 30
-            c.setFillColorRGB(0, 0, 0, alpha=0)
-            for j in range(len(ocr_data["text"])):
-                word = ocr_data["text"][j]
-                try:
-                    conf = int(ocr_data["conf"][j])
-                except (TypeError, ValueError):
-                    conf = -1
-                if not word or not word.strip() or conf < 30:
-                    continue
-                x, y = ocr_data["left"][j], ocr_data["top"][j]
-                w, h = ocr_data["width"][j], ocr_data["height"][j]
-                if h <= 0 or w <= 0:
-                    continue
-                font_size = max(h * 0.85, 1)
-                try:
-                    c.setFont("Helvetica", font_size)
-                    tw = c.stringWidth(word, "Helvetica", font_size)
-                    sx = w / tw if tw > 0 else 1
-                    c.saveState()
-                    c.transform(sx, 0, 0, 1, x, img_h - y - h)
-                    c.drawString(0, 0, word)
-                    c.restoreState()
-                except Exception:
-                    pass
-
-            c.save()
-            merger.add_page(PyPDF2.PdfReader(io.BytesIO(buf.getvalue())).pages[0])
-
-            # Progresso global
-            base_pct = (fi - 1) / total_files * 95
-            page_pct = pi / total_pages * (95 / total_files)
-            pct = base_pct + page_pct
-            self.after(0, lambda p=pct: (
-                self.progress_var.set(p), self.pb.set(p)))
-
-        self._spinner_status(
-            f"[{fi}/{total_files}] Gerando PDF...")
-        with open(output_pdf, "wb") as f:
-            merger.write(f)
+                f"[{fi}/{total_files}] Gerando PDF...")
+            with open(output_pdf, "wb") as f:
+                merger.write(f)
+        finally:
+            merger.close()
 
     def _detect_names(self, ocr_data):
         """
@@ -2620,13 +2651,23 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                  "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto",
                  "Setembro", "Outubro", "Novembro", "Dezembro"})
 
+        # Extract arrays once to avoid repeated dict lookups
+        texts = ocr_data["text"]
+        confs = ocr_data["conf"]
+        lefts = ocr_data["left"]
+        tops = ocr_data["top"]
+        widths = ocr_data["width"]
+        heights = ocr_data["height"]
+        line_nums = ocr_data["line_num"]
+        block_nums = ocr_data["block_num"]
+
         names = []
-        n = len(ocr_data["text"])
+        n = len(texts)
         i = 0
         while i < n:
-            word = ocr_data["text"][i]
+            word = texts[i]
             try:
-                conf = int(ocr_data["conf"][i])
+                conf = int(confs[i])
             except (TypeError, ValueError):
                 conf = -1
             if not word or not word.strip() or conf <= 0:
@@ -2639,17 +2680,13 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                 group = [i]
                 j = i + 1
                 while j < n:
-                    nw = ocr_data["text"][j]
+                    nw = texts[j]
                     try:
-                        nc = int(ocr_data["conf"][j])
+                        nc = int(confs[j])
                     except (TypeError, ValueError):
                         nc = -1
                     # Mesma linha e mesmo bloco
-                    same_line = (
-                        ocr_data["line_num"][j] == ocr_data["line_num"][i]
-                        and ocr_data["block_num"][j] == ocr_data["block_num"][i]
-                    )
-                    if not same_line:
+                    if line_nums[j] != line_nums[i] or block_nums[j] != block_nums[i]:
                         break
                     if not nw or not nw.strip():
                         j += 1
@@ -2668,12 +2705,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                         break
                 # Conta palavras reais (sem conectores)
                 real = [k for k in group
-                        if ocr_data["text"][k].lower() not in _CONNECTORS]
+                        if texts[k].lower() not in _CONNECTORS]
                 if len(real) >= 2:
-                    xs  = [ocr_data["left"][k] for k in group]
-                    ys  = [ocr_data["top"][k]  for k in group]
-                    x2s = [ocr_data["left"][k] + ocr_data["width"][k]  for k in group]
-                    y2s = [ocr_data["top"][k]  + ocr_data["height"][k] for k in group]
+                    xs  = [lefts[k] for k in group]
+                    ys  = [tops[k]  for k in group]
+                    x2s = [lefts[k] + widths[k]  for k in group]
+                    y2s = [tops[k]  + heights[k] for k in group]
                     names.append((min(xs), min(ys),
                                   max(x2s) - min(xs),
                                   max(y2s) - min(ys)))
@@ -2684,13 +2721,19 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
     def _spinner_status(self, msg):
         sp = self._spinner
-        if sp:
-            self.after(0, lambda: sp.set_status(msg) if sp._running else None)
+        if sp and sp._running:
+            try:
+                self.after(0, lambda: sp.set_status(msg) if sp._running else None)
+            except Exception:
+                pass
 
     def _spinner_page(self, current, total):
         sp = self._spinner
-        if sp:
-            self.after(0, lambda: sp.set_page(current, total) if sp._running else None)
+        if sp and sp._running:
+            try:
+                self.after(0, lambda: sp.set_page(current, total) if sp._running else None)
+            except Exception:
+                pass
 
     def _close_spinner(self):
         if self._spinner:
