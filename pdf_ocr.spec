@@ -56,6 +56,7 @@ a = Analysis(
         'tkinter.ttk',
         'tkinter.filedialog',
         'tkinter.messagebox',
+        'tkinterdnd2',
     ],
     hookspath=[],
     hooksconfig={},

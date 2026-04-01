@@ -6,6 +6,12 @@ Repositório: https://github.com/nicolastd5/pdf-ocr
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+try:
+    import tkinterdnd2 as TkinterDnD
+    _HAS_DND = True
+except ImportError:
+    TkinterDnD = None
+    _HAS_DND = False
 import threading
 import os
 import sys
@@ -28,7 +34,7 @@ PyPDF2 = None
 DEPS_OK = None          # None = not yet loaded; True/False = result
 MISSING_DEP = ""
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -643,7 +649,7 @@ class UpdateDialog(tk.Toplevel):
 #  Main App
 # ─────────────────────────────────────────────────────────────
 
-class PDFOcrApp(tk.Tk):
+class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
     # ícones unicode para a sidebar
     _NAV = [
@@ -1474,7 +1480,7 @@ class PDFOcrApp(tk.Tk):
         self._split_preview_lbl = tk.Label(
             preview_f, text="Pré-visualização",
             font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
-            width=22, height=12, anchor="center")
+            anchor="center")
         self._split_preview_lbl.pack(padx=8, pady=8)
         self._split_preview_photo = None  # keep reference
 
@@ -1559,7 +1565,7 @@ class PDFOcrApp(tk.Tk):
         self._split_preview_page_var.set(f"{page_num} / {self._split_total_pages}")
         self._split_preview_lbl.config(text="Carregando...", image="")
         self._pdf_thumbnail_async(
-            self._split_pdf_path, page_num, 180,
+            self._split_pdf_path, page_num, 300,
             self._split_set_preview)
 
     def _split_set_preview(self, photo):
@@ -1801,11 +1807,9 @@ class PDFOcrApp(tk.Tk):
         self._merge_listbox.bind("<<ListboxSelect>>", self._merge_on_select)
 
         # Drag & drop externo (arrastar arquivos do explorer)
-        try:
-            self._merge_listbox.drop_target_register("DND_Files")
+        if _HAS_DND:
+            self._merge_listbox.drop_target_register(TkinterDnD.DND_FILES)
             self._merge_listbox.dnd_bind("<<Drop>>", self._merge_drop_files)
-        except Exception:
-            pass  # tkinterdnd2 não disponível
 
         # ── Botões ↑ ↓ ──────────────────────────────────────────
         ord_f = tk.Frame(inner, bg=C["panel"])
@@ -1824,7 +1828,7 @@ class PDFOcrApp(tk.Tk):
         self._merge_preview_lbl = tk.Label(
             preview_f, text="Selecione um PDF\npara pré-visualizar",
             font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
-            width=22, anchor="center")
+            anchor="center")
         self._merge_preview_lbl.pack(padx=8, pady=8, expand=True)
         self._merge_preview_photo = None  # keep reference
 
@@ -1844,13 +1848,11 @@ class PDFOcrApp(tk.Tk):
                             font=("Segoe UI", 9), bg=C["input"],
                             fg=C["fg_dim"], pady=10)
         drop_lbl.pack()
-        try:
-            drop_f.drop_target_register("DND_Files")
+        if _HAS_DND:
+            drop_f.drop_target_register(TkinterDnD.DND_FILES)
             drop_f.dnd_bind("<<Drop>>", self._merge_drop_files)
-            drop_lbl.drop_target_register("DND_Files")
+            drop_lbl.drop_target_register(TkinterDnD.DND_FILES)
             drop_lbl.dnd_bind("<<Drop>>", self._merge_drop_files)
-        except Exception:
-            pass
 
         # ── Destino ──────────────────────────────────────────────
         tk.Frame(inner, bg=C["border"], height=1).grid(
@@ -1932,7 +1934,7 @@ class PDFOcrApp(tk.Tk):
         self._merge_preview_name.config(text=name)
         self._merge_preview_lbl.config(text="Carregando...", image="")
         self._pdf_thumbnail_async(
-            pdf_path, 1, 180,
+            pdf_path, 1, 300,
             self._merge_set_preview)
 
     def _merge_set_preview(self, photo):

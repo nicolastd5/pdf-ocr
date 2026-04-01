@@ -30,7 +30,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install Python dependencies
-        run: pip install pyinstaller pytesseract pillow pdf2image reportlab PyPDF2
+        run: pip install pyinstaller pytesseract pillow pdf2image reportlab PyPDF2 tkinterdnd2
 
       # ── Tesseract via Chocolatey (já disponível no runner) ───────────────────
       - name: Install Tesseract via Chocolatey
