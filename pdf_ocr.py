@@ -34,7 +34,7 @@ PyPDF2 = None
 DEPS_OK = None          # None = not yet loaded; True/False = result
 MISSING_DEP = ""
 
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -2246,17 +2246,24 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                  bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
 
         _changelog = [
-            ("⊟", "Dividir PDF",
-             "Separe um PDF em partes: intervalo único, múltiplos\n"
-             "intervalos (campo de texto ou visual) ou todas as\n"
-             "páginas individualmente."),
-            ("⊞", "Juntar PDF",
-             "Una múltiplos PDFs em um único arquivo. Reordene\n"
-             "arrastando com o mouse ou usando os botões ↑↓.\n"
-             "Suporte a drag & drop de arquivos do Explorer."),
-            ("⚙", "Melhorias gerais",
-             "Correções de layout, melhor gerenciamento de recursos\n"
-             "e tratamento de erros aprimorado."),
+            ("⬡", "Sidebar fixa",
+             "Barra lateral sempre visível com ícones e rótulos.\n"
+             "Navegação mais rápida entre as ferramentas."),
+            ("⬡", "Drag & drop no OCR",
+             "Arraste PDFs diretamente para a lista de OCR.\n"
+             "Zona visual de drop com suporte a múltiplos arquivos."),
+            ("⊟", "Prévia maior no Dividir",
+             "Controles de modo compactos acima da prévia.\n"
+             "Prévia do PDF ocupa o espaço principal expansível."),
+            ("⚙", "OCR otimizado",
+             "Filtro mediano para redução de ruído, detecção\n"
+             "automática de layout (PSM 3), threshold de confiança\n"
+             "elevado. Idioma OCR agora persiste nas preferências."),
+            ("⚙", "Correções e performance",
+             "Crash corrigido no diálogo de atualização.\n"
+             "Fechamento correto de recursos (BytesIO, PdfWriter).\n"
+             "Gradiente da barra de progresso pré-computado.\n"
+             "Memória liberada ao trocar prévias de PDF."),
         ]
 
         cl_f = tk.Frame(cl_inner, bg=C["panel"])
