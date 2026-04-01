@@ -1256,6 +1256,8 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._compress_running = True
         self.btn_compress.config(state="disabled")
         self.compress_pb.set(0)
+        self._spinner = SpinnerWindow(self)
+        self._spinner.start()
         threading.Thread(
             target=self._run_compress_batch,
             args=(list(self.compress_files), self.compress_outdir.get(),
@@ -1279,10 +1281,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         for pi in range(1, total_pages + 1):
             base_pct = (fi - 1) / total_files * 100
             page_pct = pi / total_pages * (100 / total_files)
-            self.after(0, lambda m=f"[{fi}/{total_files}] "
-                       f"{os.path.basename(input_pdf)} "
-                       f"— página {pi}/{total_pages}":
-                       self.compress_status.set(m))
+            msg = (f"[{fi}/{total_files}] "
+                   f"{os.path.basename(input_pdf)} "
+                   f"— página {pi}/{total_pages}")
+            self.after(0, lambda m=msg: self.compress_status.set(m))
+            self._spinner_status(f"{os.path.basename(input_pdf)}")
+            self._spinner_page(pi, total_pages)
 
             # Convert one page at a time to save memory
             page_imgs = convert_from_path(
@@ -1340,6 +1344,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                 errors.append(f"{os.path.basename(input_pdf)}: {e}")
 
         self.after(0, lambda: self.compress_pb.set(100))
+        self.after(0, self._close_spinner)
 
         if errors:
             err_list = "\n".join(errors)
@@ -1700,6 +1705,8 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._split_running = True
         self.btn_split.config(state="disabled")
         self._split_pb.set(0)
+        self._spinner = SpinnerWindow(self)
+        self._spinner.start()
         threading.Thread(
             target=self._run_split,
             args=(self._split_pdf_path, intervals, out_dir),
@@ -1731,6 +1738,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                     self.after(0, lambda v=pct: self._split_pb.set(v))
                     self.after(0, lambda n=i+1, tot=total: self._split_status.set(
                         f"Processando... {n}/{tot}"))
+                    self._spinner_status(f"Dividindo parte {i+1} de {total}")
 
             self.after(0, lambda: self._split_status.set(
                 f"{len(generated)} arquivo(s) gerado(s) em: {dest}"))
@@ -1740,6 +1748,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             self.after(0, lambda: self._split_status.set("Erro ao dividir o PDF."))
         finally:
             self._split_running = False
+            self.after(0, self._close_spinner)
             self.after(0, lambda: self.btn_split.config(state="normal"))
 
     # ── Página Merge ─────────────────────────────────────────
@@ -2041,6 +2050,8 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._merge_running = True
         self.btn_merge.config(state="disabled")
         self._merge_pb.set(0)
+        self._spinner = SpinnerWindow(self)
+        self._spinner.start()
         threading.Thread(
             target=self._run_merge,
             args=(list(self._merge_files), out_path),
@@ -2058,6 +2069,8 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                     self.after(0, lambda v=pct: self._merge_pb.set(v))
                     self.after(0, lambda n=i+1, tot=total: self._merge_status.set(
                         f"Processando... {n}/{tot}"))
+                    self._spinner_status(os.path.basename(f))
+                    self._spinner_page(i + 1, total)
 
                 with open(out_path, "wb") as fh:
                     merger.write(fh)
@@ -2075,6 +2088,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             self.after(0, lambda: self._merge_status.set("Erro ao juntar os PDFs."))
         finally:
             self._merge_running = False
+            self.after(0, self._close_spinner)
             self.after(0, lambda: self.btn_merge.config(state="normal"))
 
     # ── Página Sobre ──────────────────────────────────────────
