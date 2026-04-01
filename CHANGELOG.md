@@ -4,6 +4,16 @@ Todas as mudanças significativas neste projeto são documentadas neste arquivo.
 
 ---
 
+## [1.0.4] - 2026-03-31
+
+### ✨ Novas Funcionalidades
+
+- **Spinner em todas as operações**: Animação orbital dual agora aparece em Comprimir, Dividir e Juntar — igual ao OCR
+- **Página Sobre atualizada**: Versão e changelog exibidos dinamicamente via `APP_VERSION`
+- **Release notes do Actions atualizadas**: Body das releases no GitHub agora reflete as funcionalidades atuais
+
+---
+
 ## [1.0.3] - 2026-03-31
 
 ### 🐛 Correções de Bugs

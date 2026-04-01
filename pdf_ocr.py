@@ -34,7 +34,7 @@ PyPDF2 = None
 DEPS_OK = None          # None = not yet loaded; True/False = result
 MISSING_DEP = ""
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -2251,7 +2251,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         cl_inner = tk.Frame(inner, bg=C["panel"], pady=12)
         cl_inner.pack(fill="x")
 
-        tk.Label(cl_inner, text="O que há de novo — v1.0.0",
+        tk.Label(cl_inner, text=f"O que há de novo — v{APP_VERSION}",
                  font=("Segoe UI", 10, "bold"),
                  bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
 

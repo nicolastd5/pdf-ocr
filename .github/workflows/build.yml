@@ -188,19 +188,21 @@ jobs:
           files: dist/PDF_Tools.exe
           name: "PDF Tools ${{ steps.resolve_tag.outputs.tag }}"
           body: |
-            ## v1.0.0 — Lançamento oficial
+            ## ${{ steps.resolve_tag.outputs.tag }} — PDF Tools
 
-            ### ✦ Dividir PDF
-            Separe um PDF em partes: intervalo único, múltiplos intervalos
-            (campo de texto ou visual) ou todas as páginas individualmente.
+            ### ✦ Animação de processamento em todas as funções
+            Spinner orbital animado agora aparece em Comprimir, Dividir e Juntar — igual ao OCR.
 
-            ### ✦ Juntar PDF
-            Una múltiplos PDFs em um único arquivo. Reordene arrastando
-            com o mouse ou usando os botões ↑↓. Suporte a drag & drop
-            de arquivos do Explorer.
+            ### ✦ Pré-visualização maior
+            Thumbnails de Dividir e Juntar aumentados para 300px de altura.
 
-            ### ✦ Melhorias gerais
-            Correções de layout, melhor gerenciamento de recursos e
-            tratamento de erros aprimorado.
+            ### ✦ Drag & drop externo corrigido
+            Arrastar PDFs do Explorer para a janela de Juntar agora funciona corretamente.
+
+            ### ✦ Redesign visual completo
+            Nova paleta Ocean/Teal, sidebar expansível, spinner dual orbital e progress bar com gradiente animado.
+
+            ---
+            Veja o [CHANGELOG completo](https://github.com/nicolastd5/pdf-ocr/blob/master/CHANGELOG.md) para o histórico de versões.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
