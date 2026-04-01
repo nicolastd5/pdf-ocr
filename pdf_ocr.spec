@@ -52,6 +52,7 @@ a = Analysis(
         'reportlab.lib.pagesizes',
         'reportlab.lib.utils',
         'PyPDF2',
+        'pdf2docx',
         'tkinter',
         'tkinter.ttk',
         'tkinter.filedialog',

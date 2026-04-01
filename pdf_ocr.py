@@ -31,10 +31,11 @@ convert_from_path = None
 rl_canvas = None
 ImageReader = None
 PyPDF2 = None
+Converter = None        # pdf2docx.Converter
 DEPS_OK = None          # None = not yet loaded; True/False = result
 MISSING_DEP = ""
 
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -76,7 +77,7 @@ C = {
 def _load_heavy_deps():
     """Importa bibliotecas pesadas. Chamado em background thread."""
     global pytesseract, Image, ImageFilter, ImageEnhance, ImageOps, ImageTk
-    global convert_from_path, rl_canvas, ImageReader, PyPDF2
+    global convert_from_path, rl_canvas, ImageReader, PyPDF2, Converter
     global DEPS_OK, MISSING_DEP
     try:
         import pytesseract as _pytesseract
@@ -87,6 +88,7 @@ def _load_heavy_deps():
         import reportlab.pdfgen.canvas as _rl_canvas
         from reportlab.lib.utils import ImageReader as _ImageReader
         import PyPDF2 as _PyPDF2
+        from pdf2docx import Converter as _Converter
 
         pytesseract = _pytesseract
         Image = _Image
@@ -98,6 +100,7 @@ def _load_heavy_deps():
         rl_canvas = _rl_canvas
         ImageReader = _ImageReader
         PyPDF2 = _PyPDF2
+        Converter = _Converter
         DEPS_OK = True
     except ImportError as e:
         DEPS_OK = False
@@ -168,9 +171,18 @@ class SplashScreen(tk.Tk):
             self._bar.coords(self._bar_fill, cycle, 0, cycle + fill_w, 3)
         self.after(350, self._animate)
 
+    _MIN_SPLASH_MS = 2000  # tempo mínimo de exibição do splash
+
     def _start_loading(self):
+        import time as _time
+        self._splash_start = _time.monotonic()
         def _worker():
             _load_heavy_deps()
+            # Garante que o splash fique visível por pelo menos _MIN_SPLASH_MS
+            elapsed = (_time.monotonic() - self._splash_start) * 1000
+            remaining = self._MIN_SPLASH_MS - elapsed
+            if remaining > 0:
+                _time.sleep(remaining / 1000)
             self.after(0, self._on_loaded)
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -658,6 +670,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
     _NAV = [
         ("ocr",      "⬡", "OCR"),
         ("compress", "⊜", "Comprimir"),
+        ("word",     "⬢", "PDF → Word"),
         ("split",    "⊟", "Dividir"),
         ("merge",    "⊞", "Juntar"),
         ("about",    "ℹ", "Sobre"),
@@ -705,6 +718,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             value=self._QUALITY_PRESETS[2][0])
         self.compress_format     = tk.StringVar(
             value=self._IMG_FORMATS[0][0])
+
+        # ── Word ─────────────────────────────────────────────
+        self._word_files     = []
+        self._word_outdir    = tk.StringVar()
+        self._word_status    = tk.StringVar(value="Adicione PDFs para converter.")
+        self._word_running   = False
 
         # ── Split ────────────────────────────────────────────
         self._split_pdf_path = ""
@@ -874,6 +893,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
         self._build_ocr_page()
         self._build_compress_page()
+        self._build_word_page()
         self._build_split_page()
         self._build_merge_page()
         self._build_about_page()
@@ -904,11 +924,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                 outer.config(bg=C["sidebar"])
 
         titles = {
-            "ocr":      ("OCR",        "Converta PDFs escaneados em PDFs pesquisáveis"),
-            "compress": ("Comprimir",  "Reduza o tamanho de PDFs existentes"),
-            "split":    ("Dividir PDF","Separe um PDF em partes individuais"),
-            "merge":    ("Juntar PDF", "Una múltiplos PDFs em um único arquivo"),
-            "about":    ("Sobre",      f"PDF Tools  v{APP_VERSION}"),
+            "ocr":      ("OCR",         "Converta PDFs escaneados em PDFs pesquisáveis"),
+            "compress": ("Comprimir",   "Reduza o tamanho de PDFs existentes"),
+            "word":     ("PDF → Word",  "Converta PDFs em documentos Word editáveis"),
+            "split":    ("Dividir PDF", "Separe um PDF em partes individuais"),
+            "merge":    ("Juntar PDF",  "Una múltiplos PDFs em um único arquivo"),
+            "about":    ("Sobre",       f"PDF Tools  v{APP_VERSION}"),
         }
         t, s = titles[key]
         self._page_title.config(text=t)
@@ -1366,7 +1387,241 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._compress_running = False
         self.after(0, lambda: self.btn_compress.config(state="normal"))
 
-    # ── Em breve ──────────────────────────────────────────────
+    # ── Página PDF → Word ──────────────────────────────────────
+
+    def _build_word_page(self):
+        page = tk.Frame(self._pages, bg=C["bg"])
+        self._page_frames["word"] = page
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, weight=1)
+
+        card = tk.Frame(page, bg=C["panel"],
+                        highlightthickness=1,
+                        highlightbackground=C["border"])
+        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.columnconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)
+
+        # ── Cabeçalho ─────────────────────────────────────────
+        hdr = tk.Frame(card, bg=C["panel"])
+        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
+        tk.Label(hdr, text="Arquivos PDF para converter em Word",
+                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
+                 fg=C["fg"]).pack(side="left")
+        self._word_count_lbl = tk.Label(
+            hdr, text="(0 arquivo)", font=("Segoe UI", 9),
+            bg=C["panel"], fg=C["fg_dim"])
+        self._word_count_lbl.pack(side="left", padx=(6, 0))
+        _flat_btn(hdr, "✕ Remover", self._word_remove_selected,
+                  padx=8, pady=2).pack(side="right")
+        _flat_btn(hdr, "+ Adicionar", self._word_add_files,
+                  padx=8, pady=2).pack(side="right", padx=(0, 4))
+
+        # ── Listbox ───────────────────────────────────────────
+        list_f = tk.Frame(card, bg=C["panel"])
+        list_f.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 8))
+        list_f.columnconfigure(0, weight=1)
+        list_f.rowconfigure(0, weight=1)
+
+        sb_w = ttk.Scrollbar(list_f, orient="vertical",
+                              style="Dark.Vertical.TScrollbar")
+        self._word_listbox = tk.Listbox(
+            list_f,
+            bg=C["input"], fg=C["fg"],
+            selectbackground=C["sel"], selectforeground=C["fg_bright"],
+            relief="flat", highlightthickness=2,
+            highlightbackground=C["border"],
+            highlightcolor=C["accent"],
+            font=("Segoe UI", 10), activestyle="none",
+            selectmode="extended",
+            yscrollcommand=sb_w.set,
+        )
+        sb_w.config(command=self._word_listbox.yview)
+        self._word_listbox.grid(row=0, column=0, sticky="nsew")
+        sb_w.grid(row=0, column=1, sticky="ns")
+        self._word_listbox.bind(
+            "<Double-Button-1>", lambda _: self._word_remove_selected())
+
+        # ── Área de drop visual ───────────────────────────────
+        drop_f = tk.Frame(card, bg=C["input"],
+                          highlightthickness=1,
+                          highlightbackground=C["border"])
+        drop_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 8))
+        drop_lbl = tk.Label(drop_f,
+                            text="⬢  Arraste PDFs aqui  ou  clique em + Adicionar",
+                            font=("Segoe UI", 9), bg=C["input"],
+                            fg=C["fg_dim"], pady=10)
+        drop_lbl.pack()
+        if _HAS_DND:
+            self._word_listbox.drop_target_register(TkinterDnD.DND_FILES)
+            self._word_listbox.dnd_bind("<<Drop>>", self._word_drop_files)
+            drop_f.drop_target_register(TkinterDnD.DND_FILES)
+            drop_f.dnd_bind("<<Drop>>", self._word_drop_files)
+            drop_lbl.drop_target_register(TkinterDnD.DND_FILES)
+            drop_lbl.dnd_bind("<<Drop>>", self._word_drop_files)
+
+        # ── Pasta de saída ────────────────────────────────────
+        outdir_f = tk.Frame(card, bg=C["panel"])
+        outdir_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 14))
+        tk.Label(outdir_f, text="Pasta de saída", width=13, anchor="w",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
+        e_wout = tk.Entry(outdir_f, textvariable=self._word_outdir,
+                          state="readonly", font=("Segoe UI", 9), width=42)
+        _style_entry(e_wout)
+        e_wout.pack(side="left", ipady=4, padx=(0, 8))
+        _flat_btn(outdir_f, "Pasta", self._browse_word_outdir,
+                  padx=10, pady=3).pack(side="left")
+        tk.Label(outdir_f, text="(vazio = mesma pasta do PDF)",
+                 font=("Segoe UI", 8), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left", padx=(8, 0))
+
+        # ── Status + barra + botões ───────────────────────────
+        bottom = tk.Frame(page, bg=C["bg"])
+        bottom.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        bottom.columnconfigure(0, weight=1)
+
+        tk.Label(bottom, textvariable=self._word_status,
+                 font=("Segoe UI", 9), bg=C["bg"], fg=C["fg_dim"],
+                 anchor="w").grid(row=0, column=0, sticky="ew", pady=(4, 4))
+
+        self._word_pb = CanvasProgressBar(bottom, height=6)
+        self._word_pb.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+
+        btn_f = tk.Frame(bottom, bg=C["bg"])
+        btn_f.grid(row=2, column=0, sticky="w")
+        self.btn_word = _accent_btn(
+            btn_f, text="  ⬢  Converter para Word  ",
+            command=self._start_word,
+            font=("Segoe UI", 10, "bold"),
+            padx=18, pady=9,
+        )
+        self.btn_word.pack(side="left", padx=(0, 10))
+        _flat_btn(btn_f, text="Limpar lista",
+                  command=self._clear_word,
+                  padx=14, pady=9).pack(side="left")
+
+    # ── Word eventos ─────────────────────────────────────────
+
+    def _word_add_files(self):
+        paths = filedialog.askopenfilenames(
+            title="Selecionar PDFs para converter",
+            filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
+        )
+        self._word_insert_paths(paths)
+
+    def _word_drop_files(self, event):
+        raw = event.data
+        paths = re.findall(r'\{([^}]+)\}|(\S+)', raw)
+        flat = [p[0] or p[1] for p in paths]
+        pdf_paths = [p for p in flat if p.lower().endswith(".pdf")]
+        self._word_insert_paths(pdf_paths)
+
+    def _word_insert_paths(self, paths):
+        for p in paths:
+            if p not in self._word_files:
+                self._word_files.append(p)
+                self._word_listbox.insert(tk.END, os.path.basename(p))
+        self._update_word_count()
+
+    def _word_remove_selected(self):
+        sel = list(self._word_listbox.curselection())
+        for idx in reversed(sel):
+            self._word_listbox.delete(idx)
+            del self._word_files[idx]
+        self._update_word_count()
+
+    def _browse_word_outdir(self):
+        d = filedialog.askdirectory(title="Pasta de saída para arquivos Word")
+        if d:
+            self._word_outdir.set(d)
+
+    def _update_word_count(self):
+        n = len(self._word_files)
+        self._word_count_lbl.config(
+            text=f"({n} arquivo{'s' if n != 1 else ''})")
+
+    def _clear_word(self):
+        self._word_files.clear()
+        self._word_listbox.delete(0, tk.END)
+        self._word_pb.set(0)
+        self._word_outdir.set("")
+        self._word_status.set("Adicione PDFs para converter.")
+        self._update_word_count()
+
+    def _start_word(self):
+        if not DEPS_OK:
+            self._show_dep_error()
+            return
+        if not self._word_files:
+            messagebox.showwarning("Aviso", "Adicione ao menos um PDF.")
+            return
+        if self._word_running:
+            return
+
+        self._word_running = True
+        self.btn_word.config(state="disabled")
+        self._word_pb.set(0)
+        self._spinner = SpinnerWindow(self)
+        self._spinner.start()
+        threading.Thread(
+            target=self._run_word_batch,
+            args=(list(self._word_files), self._word_outdir.get()),
+            daemon=True,
+        ).start()
+
+    def _run_word_batch(self, files, outdir):
+        total = len(files)
+        ok_files, errors = [], []
+
+        for fi, input_pdf in enumerate(files, 1):
+            base = os.path.splitext(os.path.basename(input_pdf))[0]
+            dest_dir = outdir if outdir else os.path.dirname(input_pdf)
+            output_docx = os.path.join(dest_dir, base + ".docx")
+            basename = os.path.basename(input_pdf)
+            try:
+                self._spinner_status(f"[{fi}/{total}] {basename}")
+                self.after(0, lambda m=f"[{fi}/{total}] Convertendo {basename}...":
+                           self._word_status.set(m))
+
+                cv = Converter(input_pdf)
+                try:
+                    cv.convert(output_docx)
+                finally:
+                    cv.close()
+
+                ok_files.append(output_docx)
+            except Exception as e:
+                errors.append(f"{basename}: {e}")
+
+            pct = fi / total * 100
+            self.after(0, lambda p=pct: self._word_pb.set(p))
+
+        self.after(0, lambda: self._word_pb.set(100))
+        self.after(0, self._close_spinner)
+
+        if errors:
+            err_list = "\n".join(errors)
+            self.after(0, lambda: self._word_status.set(
+                f"Concluído com {len(errors)} erro(s)."))
+            self.after(0, lambda: messagebox.showwarning(
+                "Conversão concluída com erros",
+                f"{len(ok_files)} arquivo(s) convertido(s) com sucesso.\n\n"
+                f"Erros:\n{err_list}"
+            ))
+        else:
+            listing = "\n".join(os.path.basename(p) for p in ok_files)
+            self.after(0, lambda: self._word_status.set(
+                f"Concluído! {total} arquivo(s) convertido(s)."))
+            self.after(0, lambda: messagebox.showinfo(
+                "Conversão concluída",
+                f"{total} arquivo(s) Word gerado(s)!\n\n{listing}"
+            ))
+
+        self._word_running = False
+        self.after(0, lambda: self.btn_word.config(state="normal"))
+
+    # ── Página Dividir ───────────────────────────────────────
 
     def _build_split_page(self):
         page = tk.Frame(self._pages, bg=C["bg"])
@@ -2163,6 +2418,8 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                                    "com destaque automático de nomes de pessoas."),
             ("⊜", "Comprimir",    "Reduz o tamanho de PDFs com opções de\n"
                                    "qualidade (100–250 DPI) e formato (JPEG/PNG)."),
+            ("⬢", "PDF → Word",   "Converte PDFs em documentos Word (.docx)\n"
+                                   "editáveis, preservando formatação e layout."),
             ("⊟", "Dividir PDF",  "Separa um PDF por intervalo único, múltiplos\n"
                                    "intervalos ou todas as páginas individualmente."),
             ("⊞", "Juntar PDF",   "Une múltiplos PDFs em ordem personalizável,\n"
@@ -2246,24 +2503,23 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                  bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
 
         _changelog = [
+            ("⬢", "PDF → Word",
+             "Nova ferramenta: converte PDFs em documentos Word\n"
+             "(.docx) editáveis com preservação de layout.\n"
+             "Suporte a drag & drop e conversão em lote."),
+            ("⬡", "Splash screen aprimorado",
+             "Tela de carregamento com tempo mínimo de exibição\n"
+             "para melhor experiência visual ao iniciar."),
             ("⬡", "Sidebar fixa",
              "Barra lateral sempre visível com ícones e rótulos.\n"
              "Navegação mais rápida entre as ferramentas."),
             ("⬡", "Drag & drop no OCR",
              "Arraste PDFs diretamente para a lista de OCR.\n"
              "Zona visual de drop com suporte a múltiplos arquivos."),
-            ("⊟", "Prévia maior no Dividir",
-             "Controles de modo compactos acima da prévia.\n"
-             "Prévia do PDF ocupa o espaço principal expansível."),
-            ("⚙", "OCR otimizado",
-             "Filtro mediano para redução de ruído, detecção\n"
-             "automática de layout (PSM 3), threshold de confiança\n"
-             "elevado. Idioma OCR agora persiste nas preferências."),
-            ("⚙", "Correções e performance",
-             "Crash corrigido no diálogo de atualização.\n"
-             "Fechamento correto de recursos (BytesIO, PdfWriter).\n"
-             "Gradiente da barra de progresso pré-computado.\n"
-             "Memória liberada ao trocar prévias de PDF."),
+            ("⚙", "OCR otimizado e correções",
+             "Filtro mediano, PSM 3 automático, threshold elevado.\n"
+             "Recursos fechados corretamente, memória otimizada.\n"
+             "Crash no diálogo de atualização corrigido."),
         ]
 
         cl_f = tk.Frame(cl_inner, bg=C["panel"])
@@ -2758,7 +3014,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         messagebox.showerror(
             "Dependências faltando",
             f"Biblioteca não instalada: {missing}\n\n"
-            "Execute:\npip install pytesseract pillow pdf2image reportlab PyPDF2"
+            "Execute:\npip install pytesseract pillow pdf2image reportlab PyPDF2 pdf2docx"
         )
 
 
