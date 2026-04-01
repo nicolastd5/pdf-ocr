@@ -797,27 +797,24 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         threading.Thread(target=_worker, daemon=True).start()
 
     # ── Sidebar constants ────────────────────────────────────────
-    _SIDEBAR_COLLAPSED = 56
-    _SIDEBAR_EXPANDED  = 180
-    _SIDEBAR_ANIM_MS   = 15      # intervalo entre frames
-    _SIDEBAR_ANIM_STEP = 12      # pixels por frame
+    _SIDEBAR_WIDTH = 180
 
     # ── Layout principal ──────────────────────────────────────
 
     def _build_ui(self):
-        # sidebar container — usa place para animar width
-        self._sidebar = tk.Frame(self, bg=C["sidebar"], width=self._SIDEBAR_COLLAPSED)
+        # sidebar fixa — sempre expandida
+        self._sidebar = tk.Frame(self, bg=C["sidebar"], width=self._SIDEBAR_WIDTH)
         self._sidebar.pack(side="left", fill="y")
         self._sidebar.pack_propagate(False)
-        self._sidebar_expanded = False
-        self._sidebar_anim_id = None
-        self._sidebar_target_w = self._SIDEBAR_COLLAPSED
 
         # cabeçalho da sidebar
         self._sidebar_logo = tk.Label(self._sidebar, text="⬡",
                  font=("Segoe UI", 18), bg=C["sidebar"],
                  fg=C["accent"])
         self._sidebar_logo.pack(pady=(18, 2))
+        tk.Label(self._sidebar, text="PDF Tools",
+                 font=("Segoe UI", 10, "bold"), bg=C["sidebar"],
+                 fg=C["fg"]).pack(pady=(0, 2))
         tk.Frame(self._sidebar, bg=C["border"], height=1).pack(fill="x", padx=8, pady=6)
 
         # botões de navegação
@@ -846,13 +843,9 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                            bg=C["sidebar"], fg=C["fg_dim"],
                            cursor="hand2")
             lbl.bind("<Button-1>", lambda _, k=key: self._show_page(k))
-            # label starts hidden (collapsed)
+            lbl.pack(side="left", padx=(4, 0))
             self._nav_btns[key] = btn
             self._nav_labels[key] = lbl
-
-        # hover para expandir / retrair
-        self._sidebar.bind("<Enter>", self._sidebar_expand)
-        self._sidebar.bind("<Leave>", self._sidebar_collapse)
 
         # área de conteúdo
         self._content = tk.Frame(self, bg=C["bg"])
@@ -882,39 +875,6 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._build_merge_page()
         self._build_about_page()
 
-    # ── Sidebar animation ─────────────────────────────────────
-
-    def _sidebar_expand(self, _event=None):
-        self._sidebar_expanded = True
-        self._sidebar_target_w = self._SIDEBAR_EXPANDED
-        # mostrar labels
-        for key, lbl in self._nav_labels.items():
-            lbl.pack(side="left", padx=(4, 0))
-        if not self._sidebar_anim_id:
-            self._sidebar_animate()
-
-    def _sidebar_collapse(self, _event=None):
-        self._sidebar_expanded = False
-        self._sidebar_target_w = self._SIDEBAR_COLLAPSED
-        # esconder labels
-        for key, lbl in self._nav_labels.items():
-            lbl.pack_forget()
-        if not self._sidebar_anim_id:
-            self._sidebar_animate()
-
-    def _sidebar_animate(self):
-        current_w = self._sidebar.winfo_width()
-        target = self._sidebar_target_w
-        if current_w == target:
-            self._sidebar_anim_id = None
-            return
-        if current_w < target:
-            new_w = min(current_w + self._SIDEBAR_ANIM_STEP, target)
-        else:
-            new_w = max(current_w - self._SIDEBAR_ANIM_STEP, target)
-        self._sidebar.config(width=new_w)
-        self._sidebar_anim_id = self.after(self._SIDEBAR_ANIM_MS, self._sidebar_animate)
-
     def _show_page(self, key):
         if self._active_page == key:
             return
@@ -927,12 +887,18 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         # atualiza destaque da sidebar
         for k, btn in self._nav_btns.items():
             lbl = self._nav_labels[k]
+            inner = btn.master
+            outer = inner.master
             if k == key:
                 btn.config(fg=C["accent"], bg=C["hover"])
                 lbl.config(fg=C["accent"], bg=C["hover"])
+                inner.config(bg=C["hover"])
+                outer.config(bg=C["hover"])
             else:
                 btn.config(fg=C["fg_dim"], bg=C["sidebar"])
                 lbl.config(fg=C["fg_dim"], bg=C["sidebar"])
+                inner.config(bg=C["sidebar"])
+                outer.config(bg=C["sidebar"])
 
         titles = {
             "ocr":      ("OCR",        "Converta PDFs escaneados em PDFs pesquisáveis"),
@@ -998,12 +964,29 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         sb_ocr.config(command=self.ocr_listbox.yview)
         self.ocr_listbox.grid(row=0, column=0, sticky="nsew")
         sb_ocr.grid(row=0, column=1, sticky="ns")
-        # Drag-and-drop (double-click to remove individual)
         self.ocr_listbox.bind("<Double-Button-1>", lambda _: self._ocr_remove_selected())
+
+        # ── Área de drop visual ───────────────────────────────
+        drop_f = tk.Frame(card, bg=C["input"],
+                          highlightthickness=1,
+                          highlightbackground=C["border"])
+        drop_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 8))
+        drop_lbl = tk.Label(drop_f,
+                            text="⬡  Arraste PDFs aqui  ou  clique em + Adicionar",
+                            font=("Segoe UI", 9), bg=C["input"],
+                            fg=C["fg_dim"], pady=10)
+        drop_lbl.pack()
+        if _HAS_DND:
+            self.ocr_listbox.drop_target_register(TkinterDnD.DND_FILES)
+            self.ocr_listbox.dnd_bind("<<Drop>>", self._ocr_drop_files)
+            drop_f.drop_target_register(TkinterDnD.DND_FILES)
+            drop_f.dnd_bind("<<Drop>>", self._ocr_drop_files)
+            drop_lbl.drop_target_register(TkinterDnD.DND_FILES)
+            drop_lbl.dnd_bind("<<Drop>>", self._ocr_drop_files)
 
         # ── Pasta de saída (opcional) ─────────────────────────
         outdir_f = tk.Frame(card, bg=C["panel"])
-        outdir_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+        outdir_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
         tk.Label(outdir_f, text="Pasta de saída", width=13, anchor="w",
                  font=("Segoe UI", 9), bg=C["panel"],
                  fg=C["fg_dim"]).pack(side="left")
@@ -1019,7 +1002,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
         # ── Idioma + opções ───────────────────────────────────
         cfg_f = tk.Frame(card, bg=C["panel"])
-        cfg_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 14))
+        cfg_f.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 14))
 
         tk.Label(cfg_f, text="Idioma OCR", width=13, anchor="w",
                  font=("Segoe UI", 9), bg=C["panel"],
@@ -1405,40 +1388,31 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
         tk.Frame(inner, bg=C["border"], height=1).grid(row=1, column=0, sticky="ew", pady=(0, 12))
 
-        # ── Preview + controles lado a lado ──────────────────────
-        content_f = tk.Frame(inner, bg=C["panel"])
-        content_f.grid(row=2, column=0, sticky="nsew", pady=(0, 8))
-        content_f.columnconfigure(0, weight=1)
+        # ── Modo de divisão (compacto, acima da prévia) ─────────────
+        mode_f = tk.Frame(inner, bg=C["panel"])
+        mode_f.grid(row=2, column=0, sticky="ew", pady=(0, 8))
 
-        # Coluna esquerda: controles
-        controls_f = tk.Frame(content_f, bg=C["panel"])
-        controls_f.pack(side="left", fill="both", expand=True)
-
-        # ── Modo de divisão ──────────────────────────────────────
-        tk.Label(controls_f, text="Modo de divisão",
+        tk.Label(mode_f, text="Modo:",
                  font=("Segoe UI", 9, "bold"), bg=C["panel"],
-                 fg=C["fg"]).pack(anchor="w", pady=(0, 8))
+                 fg=C["fg"]).pack(side="left", padx=(0, 8))
 
         self._split_mode = tk.StringVar(value="single")
-        modes_f = tk.Frame(controls_f, bg=C["panel"])
-        modes_f.pack(anchor="w", pady=(0, 12))
-
         for val, label in [("single", "Intervalo único"),
                            ("multi",  "Múltiplos intervalos"),
-                           ("all",    "Todas as páginas individualmente")]:
+                           ("all",    "Todas individualmente")]:
             tk.Radiobutton(
-                modes_f, text=label, variable=self._split_mode,
+                mode_f, text=label, variable=self._split_mode,
                 value=val, command=self._split_update_mode_ui,
                 bg=C["panel"], fg=C["fg"],
                 selectcolor=C["input"],
                 activebackground=C["panel"], activeforeground=C["accent"],
                 font=("Segoe UI", 9),
                 highlightthickness=0,
-            ).pack(side="left", padx=(0, 20))
+            ).pack(side="left", padx=(0, 14))
 
-        # ── Painel modo único ────────────────────────────────────
-        self._split_single_f = tk.Frame(controls_f, bg=C["panel"])
-        self._split_single_f.pack(anchor="w", pady=(0, 8))
+        # ── Painel modo único (inline nos controles) ─────────────
+        self._split_single_f = tk.Frame(mode_f, bg=C["panel"])
+        self._split_single_f.pack(side="left", padx=(10, 0))
         tk.Label(self._split_single_f, text="De:", font=("Segoe UI", 9),
                  bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
         self._split_from = tk.StringVar(value="1")
@@ -1455,7 +1429,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         e_to.pack(side="left", ipady=3, padx=(4, 0))
 
         # ── Painel múltiplos intervalos ──────────────────────────
-        self._split_multi_f = tk.Frame(controls_f, bg=C["panel"])
+        self._split_multi_f = tk.Frame(inner, bg=C["panel"])
         # Starts hidden; shown via _split_update_mode_ui
 
         # campo de texto livre
@@ -1476,17 +1450,18 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         _flat_btn(self._split_multi_f, "+ Adicionar intervalo",
                   self._split_add_interval_row, padx=8, pady=2).pack(anchor="w")
 
-        # Coluna direita: preview
-        preview_f = tk.Frame(content_f, bg=C["input"],
+        # ── Prévia (ocupa o espaço principal) ────────────────────
+        inner.rowconfigure(4, weight=1)
+        preview_f = tk.Frame(inner, bg=C["input"],
                              highlightthickness=1,
                              highlightbackground=C["border"])
-        preview_f.pack(side="right", padx=(16, 0))
+        preview_f.grid(row=4, column=0, sticky="nsew", pady=(0, 8))
 
         self._split_preview_lbl = tk.Label(
             preview_f, text="Pré-visualização",
-            font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
+            font=("Segoe UI", 9), bg=C["input"], fg=C["fg_dim"],
             anchor="center")
-        self._split_preview_lbl.pack(padx=8, pady=8)
+        self._split_preview_lbl.pack(fill="both", expand=True, padx=8, pady=8)
         self._split_preview_photo = None  # keep reference
 
         # Navegação de páginas no preview
@@ -1504,10 +1479,10 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._split_preview_current = 1
 
         # ── Destino ──────────────────────────────────────────────
-        tk.Frame(inner, bg=C["border"], height=1).grid(row=3, column=0, sticky="ew", pady=(4, 10))
+        tk.Frame(inner, bg=C["border"], height=1).grid(row=5, column=0, sticky="ew", pady=(4, 10))
 
         dest_f = tk.Frame(inner, bg=C["panel"])
-        dest_f.grid(row=4, column=0, sticky="ew", pady=(0, 12))
+        dest_f.grid(row=6, column=0, sticky="ew", pady=(0, 12))
         self._split_same_dir = tk.BooleanVar(value=True)
         tk.Checkbutton(
             dest_f, text="Salvar na mesma pasta do arquivo original",
@@ -1523,13 +1498,13 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._split_status = tk.StringVar(value="Selecione um PDF para dividir.")
         tk.Label(inner, textvariable=self._split_status,
                  font=("Segoe UI", 9), bg=C["panel"],
-                 fg=C["fg_dim"], anchor="w").grid(row=5, column=0, sticky="ew", pady=(0, 4))
+                 fg=C["fg_dim"], anchor="w").grid(row=7, column=0, sticky="ew", pady=(0, 4))
 
         self._split_pb = CanvasProgressBar(inner, height=6)
-        self._split_pb.grid(row=6, column=0, sticky="ew", pady=(0, 10))
+        self._split_pb.grid(row=8, column=0, sticky="ew", pady=(0, 10))
 
         btn_f = tk.Frame(inner, bg=C["panel"])
-        btn_f.grid(row=7, column=0, sticky="w")
+        btn_f.grid(row=9, column=0, sticky="w")
         self.btn_split = _accent_btn(
             btn_f, text="  \u229f  Dividir PDF  ",
             command=self._start_split,
@@ -1570,7 +1545,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._split_preview_page_var.set(f"{page_num} / {self._split_total_pages}")
         self._split_preview_lbl.config(text="Carregando...", image="")
         self._pdf_thumbnail_async(
-            self._split_pdf_path, page_num, 300,
+            self._split_pdf_path, page_num, 400,
             self._split_set_preview)
 
     def _split_set_preview(self, photo):
@@ -1595,14 +1570,15 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
     def _split_update_mode_ui(self):
         mode = self._split_mode.get()
         if mode == "single":
-            self._split_single_f.pack(anchor="w", pady=(0, 8))
-            self._split_multi_f.pack_forget()
+            self._split_single_f.pack(side="left", padx=(10, 0))
+            self._split_multi_f.grid_forget()
         elif mode == "multi":
             self._split_single_f.pack_forget()
-            self._split_multi_f.pack(anchor="w", fill="x", pady=(0, 8))
+            self._split_multi_f.grid(row=3, column=0, sticky="ew",
+                                     pady=(0, 8))
         else:  # all
             self._split_single_f.pack_forget()
-            self._split_multi_f.pack_forget()
+            self._split_multi_f.grid_forget()
 
     def _split_add_interval_row(self):
         row_f = tk.Frame(self._split_rows_f, bg=C["panel"])
@@ -2368,6 +2344,16 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             title="Selecionar PDFs para OCR",
             filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
         )
+        self._ocr_insert_paths(paths)
+
+    def _ocr_drop_files(self, event):
+        raw = event.data
+        paths = re.findall(r'\{([^}]+)\}|(\S+)', raw)
+        flat = [p[0] or p[1] for p in paths]
+        pdf_paths = [p for p in flat if p.lower().endswith(".pdf")]
+        self._ocr_insert_paths(pdf_paths)
+
+    def _ocr_insert_paths(self, paths):
         for p in paths:
             if p not in self.ocr_files:
                 self.ocr_files.append(p)
@@ -2480,11 +2466,14 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
     def _preprocess_for_ocr(pil_img):
         """Preprocessa imagem para melhorar precisão do OCR.
 
-        Pipeline: grayscale → contraste → nitidez → binarização Otsu.
+        Pipeline: grayscale → redução de ruído → contraste → nitidez → binarização Otsu.
         Retorna imagem processada no mesmo tamanho da original.
         """
         # Converter para escala de cinza
         gray = pil_img.convert("L")
+
+        # Reduzir ruído de digitalização com filtro mediano
+        gray = gray.filter(ImageFilter.MedianFilter(size=3))
 
         # Aumentar contraste
         enhancer = ImageEnhance.Contrast(gray)
@@ -2497,7 +2486,6 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         # Calcula threshold pelo histograma
         hist = gray.histogram()
         total = sum(hist)
-        current = 0
         threshold = 128
         weight_bg = 0
         sum_bg = 0
@@ -2530,8 +2518,8 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         with open(input_pdf, "rb") as fh:
             total_pages = len(PyPDF2.PdfReader(fh).pages)
 
-        # Tesseract config: OEM 3 (best available), PSM 6 (block of text)
-        tess_config = "--oem 3 --psm 6"
+        # Tesseract config: OEM 3 (best available), PSM 3 (fully automatic)
+        tess_config = "--oem 3 --psm 3"
 
         merger = PyPDF2.PdfWriter()
 
@@ -2579,7 +2567,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                                fill=1, stroke=0)
                     c.restoreState()
 
-            # Invisible text layer — minimum confidence threshold 20
+            # Invisible text layer — minimum confidence threshold 30
             c.setFillColorRGB(0, 0, 0, alpha=0)
             for j in range(len(ocr_data["text"])):
                 word = ocr_data["text"][j]
@@ -2587,7 +2575,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                     conf = int(ocr_data["conf"][j])
                 except (TypeError, ValueError):
                     conf = -1
-                if not word or not word.strip() or conf < 20:
+                if not word or not word.strip() or conf < 30:
                     continue
                 x, y = ocr_data["left"][j], ocr_data["top"][j]
                 w, h = ocr_data["width"][j], ocr_data["height"][j]
