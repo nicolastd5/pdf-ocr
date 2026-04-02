@@ -1,3 +1,4 @@
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QPushButton
 
 C = {
@@ -10,6 +11,7 @@ C = {
     "accent":    "#2dd4bf",
     "accent2":   "#38bdf8",
     "accent_dk": "#0d9488",
+    "accent_fg": "#0f172a",
     "fg":        "#e2e8f0",
     "fg_dim":    "#64748b",
     "fg_bright": "#f8fafc",
@@ -58,11 +60,11 @@ QPushButton#flat_btn:hover {{
 }}
 QPushButton#flat_btn:disabled {{
     color: {C["fg_dim"]};
-    opacity: 0.5;
+    background-color: {C["bg"]};
 }}
 QPushButton#accent_btn {{
     background-color: {C["accent"]};
-    color: #0f172a;
+    color: {C["accent_fg"]};
     border: none;
     border-radius: 5px;
     padding: 9px 18px;
@@ -204,7 +206,6 @@ QFrame#card {{
 def flat_btn(text: str) -> QPushButton:
     b = QPushButton(text)
     b.setObjectName("flat_btn")
-    from PyQt6.QtCore import Qt
     b.setCursor(Qt.CursorShape.PointingHandCursor)
     return b
 
@@ -212,7 +213,6 @@ def flat_btn(text: str) -> QPushButton:
 def accent_btn(text: str) -> QPushButton:
     b = QPushButton(text)
     b.setObjectName("accent_btn")
-    from PyQt6.QtCore import Qt
     b.setCursor(Qt.CursorShape.PointingHandCursor)
     return b
 
@@ -220,7 +220,5 @@ def accent_btn(text: str) -> QPushButton:
 def nav_btn(text: str) -> QPushButton:
     b = QPushButton(text)
     b.setObjectName("nav_btn")
-    from PyQt6.QtCore import Qt
     b.setCursor(Qt.CursorShape.PointingHandCursor)
-    b.setCheckable(False)
     return b
