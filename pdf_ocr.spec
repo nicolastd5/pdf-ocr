@@ -37,7 +37,7 @@ if os.path.isdir(poppler_bin):
 # ─────────────────────────────────────────────────────────────────────────────
 
 a = Analysis(
-    ['pdf_ocr.py'],
+    ['pdf_ocr_qt/main.py'],
     pathex=[],
     binaries=tess_binaries + poppler_binaries,
     datas=tess_datas,
@@ -53,11 +53,10 @@ a = Analysis(
         'reportlab.lib.utils',
         'PyPDF2',
         'pdf2docx',
-        'tkinter',
-        'tkinter.ttk',
-        'tkinter.filedialog',
-        'tkinter.messagebox',
-        'tkinterdnd2',
+        'PyQt6',
+        'PyQt6.QtWidgets',
+        'PyQt6.QtCore',
+        'PyQt6.QtGui',
     ],
     hookspath=[],
     hooksconfig={},
