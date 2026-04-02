@@ -41,12 +41,13 @@ The entire application lives in a single file: `pdf_ocr.py`. There are no module
 
 **Module-level helpers:** `check_tesseract()`, `find_poppler()`, `_bundled_bin()`, `fetch_latest_release()`, `_flat_btn()`, `_accent_btn()`, `_style_entry()`
 
-**Four pages, each self-contained:**
+**Five pages, each self-contained:**
 
 | Key | Build method | State prefix | Core logic methods |
 |---|---|---|---|
 | `ocr` | `_build_ocr_page` | `self.ocr_*`, `self._running` | `_run_ocr_batch`, `_run_ocr_single`, `_detect_names` |
 | `compress` | `_build_compress_page` | `self.compress_*`, `self._compress_running` | `_run_compress_batch`, `_run_compress_single` |
+| `word` | `_build_word_page` | `self._word_*` | `_run_word_batch` |
 | `split` | `_build_split_page` | `self._split_*` | `_run_split`, `_parse_split_intervals` |
 | `merge` | `_build_merge_page` | `self._merge_*` | `_run_merge`, `_merge_drag_*` |
 

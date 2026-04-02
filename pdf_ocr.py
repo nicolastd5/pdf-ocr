@@ -31,10 +31,11 @@ convert_from_path = None
 rl_canvas = None
 ImageReader = None
 PyPDF2 = None
+Converter = None        # pdf2docx.Converter
 DEPS_OK = None          # None = not yet loaded; True/False = result
 MISSING_DEP = ""
 
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.6"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -76,7 +77,7 @@ C = {
 def _load_heavy_deps():
     """Importa bibliotecas pesadas. Chamado em background thread."""
     global pytesseract, Image, ImageFilter, ImageEnhance, ImageOps, ImageTk
-    global convert_from_path, rl_canvas, ImageReader, PyPDF2
+    global convert_from_path, rl_canvas, ImageReader, PyPDF2, Converter
     global DEPS_OK, MISSING_DEP
     try:
         import pytesseract as _pytesseract
@@ -87,6 +88,7 @@ def _load_heavy_deps():
         import reportlab.pdfgen.canvas as _rl_canvas
         from reportlab.lib.utils import ImageReader as _ImageReader
         import PyPDF2 as _PyPDF2
+        from pdf2docx import Converter as _Converter
 
         pytesseract = _pytesseract
         Image = _Image
@@ -98,6 +100,7 @@ def _load_heavy_deps():
         rl_canvas = _rl_canvas
         ImageReader = _ImageReader
         PyPDF2 = _PyPDF2
+        Converter = _Converter
         DEPS_OK = True
     except ImportError as e:
         DEPS_OK = False
@@ -168,9 +171,18 @@ class SplashScreen(tk.Tk):
             self._bar.coords(self._bar_fill, cycle, 0, cycle + fill_w, 3)
         self.after(350, self._animate)
 
+    _MIN_SPLASH_MS = 2000  # tempo mínimo de exibição do splash
+
     def _start_loading(self):
+        import time as _time
+        self._splash_start = _time.monotonic()
         def _worker():
             _load_heavy_deps()
+            # Garante que o splash fique visível por pelo menos _MIN_SPLASH_MS
+            elapsed = (_time.monotonic() - self._splash_start) * 1000
+            remaining = self._MIN_SPLASH_MS - elapsed
+            if remaining > 0:
+                _time.sleep(remaining / 1000)
             self.after(0, self._on_loaded)
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -356,6 +368,11 @@ class CanvasProgressBar(tk.Canvas):
         self._shimmer_offset = 0
         self._animating = False
         self._after_id = None
+        # Pre-compute gradient color table for performance
+        self._grad_colors = [
+            self._lerp_color(C["grad_start"], C["grad_end"], i / self._GRAD_STEPS)
+            for i in range(self._GRAD_STEPS)
+        ]
         self.bind("<Configure>", self._redraw)
 
     def set(self, value):
@@ -399,16 +416,15 @@ class CanvasProgressBar(tk.Canvas):
         # gradient fill
         fill_w = int(w * self._value / 100)
         if fill_w > r:
-            for i in range(self._GRAD_STEPS):
-                x1 = int(i * fill_w / self._GRAD_STEPS)
-                x2 = int((i + 1) * fill_w / self._GRAD_STEPS)
+            n = self._GRAD_STEPS
+            offset = int(self._shimmer_offset / 60 * n)
+            for i in range(n):
+                x1 = int(i * fill_w / n)
+                x2 = int((i + 1) * fill_w / n)
                 if x2 > fill_w:
                     x2 = fill_w
-                t = ((i / self._GRAD_STEPS) + self._shimmer_offset / 60) % 1.0
-                color = self._lerp_color(C["grad_start"], C["grad_end"], t)
-                if i == 0:
-                    self._rounded_rect(x1, 0, x2, h, r, fill=color, outline="")
-                elif i == self._GRAD_STEPS - 1:
+                color = self._grad_colors[(i + offset) % n]
+                if i == 0 or i == n - 1:
                     self._rounded_rect(x1, 0, x2, h, r, fill=color, outline="")
                 else:
                     self.create_rectangle(x1, 0, x2, h, fill=color, outline="")
@@ -642,7 +658,6 @@ class UpdateDialog(tk.Toplevel):
         except Exception:
             pass
         self.destroy()
-        messagebox.showerror("Falha no download", msg, parent=self)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -655,6 +670,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
     _NAV = [
         ("ocr",      "⬡", "OCR"),
         ("compress", "⊜", "Comprimir"),
+        ("word",     "⬢", "PDF → Word"),
         ("split",    "⊟", "Dividir"),
         ("merge",    "⊞", "Juntar"),
         ("about",    "ℹ", "Sobre"),
@@ -702,6 +718,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             value=self._QUALITY_PRESETS[2][0])
         self.compress_format     = tk.StringVar(
             value=self._IMG_FORMATS[0][0])
+
+        # ── Word ─────────────────────────────────────────────
+        self._word_files     = []
+        self._word_outdir    = tk.StringVar()
+        self._word_status    = tk.StringVar(value="Adicione PDFs para converter.")
+        self._word_running   = False
 
         # ── Split ────────────────────────────────────────────
         self._split_pdf_path = ""
@@ -797,27 +819,24 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         threading.Thread(target=_worker, daemon=True).start()
 
     # ── Sidebar constants ────────────────────────────────────────
-    _SIDEBAR_COLLAPSED = 56
-    _SIDEBAR_EXPANDED  = 180
-    _SIDEBAR_ANIM_MS   = 15      # intervalo entre frames
-    _SIDEBAR_ANIM_STEP = 12      # pixels por frame
+    _SIDEBAR_WIDTH = 180
 
     # ── Layout principal ──────────────────────────────────────
 
     def _build_ui(self):
-        # sidebar container — usa place para animar width
-        self._sidebar = tk.Frame(self, bg=C["sidebar"], width=self._SIDEBAR_COLLAPSED)
+        # sidebar fixa — sempre expandida
+        self._sidebar = tk.Frame(self, bg=C["sidebar"], width=self._SIDEBAR_WIDTH)
         self._sidebar.pack(side="left", fill="y")
         self._sidebar.pack_propagate(False)
-        self._sidebar_expanded = False
-        self._sidebar_anim_id = None
-        self._sidebar_target_w = self._SIDEBAR_COLLAPSED
 
         # cabeçalho da sidebar
         self._sidebar_logo = tk.Label(self._sidebar, text="⬡",
                  font=("Segoe UI", 18), bg=C["sidebar"],
                  fg=C["accent"])
         self._sidebar_logo.pack(pady=(18, 2))
+        tk.Label(self._sidebar, text="PDF Tools",
+                 font=("Segoe UI", 10, "bold"), bg=C["sidebar"],
+                 fg=C["fg"]).pack(pady=(0, 2))
         tk.Frame(self._sidebar, bg=C["border"], height=1).pack(fill="x", padx=8, pady=6)
 
         # botões de navegação
@@ -846,13 +865,9 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                            bg=C["sidebar"], fg=C["fg_dim"],
                            cursor="hand2")
             lbl.bind("<Button-1>", lambda _, k=key: self._show_page(k))
-            # label starts hidden (collapsed)
+            lbl.pack(side="left", padx=(4, 0))
             self._nav_btns[key] = btn
             self._nav_labels[key] = lbl
-
-        # hover para expandir / retrair
-        self._sidebar.bind("<Enter>", self._sidebar_expand)
-        self._sidebar.bind("<Leave>", self._sidebar_collapse)
 
         # área de conteúdo
         self._content = tk.Frame(self, bg=C["bg"])
@@ -878,42 +893,10 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
         self._build_ocr_page()
         self._build_compress_page()
+        self._build_word_page()
         self._build_split_page()
         self._build_merge_page()
         self._build_about_page()
-
-    # ── Sidebar animation ─────────────────────────────────────
-
-    def _sidebar_expand(self, _event=None):
-        self._sidebar_expanded = True
-        self._sidebar_target_w = self._SIDEBAR_EXPANDED
-        # mostrar labels
-        for key, lbl in self._nav_labels.items():
-            lbl.pack(side="left", padx=(4, 0))
-        if not self._sidebar_anim_id:
-            self._sidebar_animate()
-
-    def _sidebar_collapse(self, _event=None):
-        self._sidebar_expanded = False
-        self._sidebar_target_w = self._SIDEBAR_COLLAPSED
-        # esconder labels
-        for key, lbl in self._nav_labels.items():
-            lbl.pack_forget()
-        if not self._sidebar_anim_id:
-            self._sidebar_animate()
-
-    def _sidebar_animate(self):
-        current_w = self._sidebar.winfo_width()
-        target = self._sidebar_target_w
-        if current_w == target:
-            self._sidebar_anim_id = None
-            return
-        if current_w < target:
-            new_w = min(current_w + self._SIDEBAR_ANIM_STEP, target)
-        else:
-            new_w = max(current_w - self._SIDEBAR_ANIM_STEP, target)
-        self._sidebar.config(width=new_w)
-        self._sidebar_anim_id = self.after(self._SIDEBAR_ANIM_MS, self._sidebar_animate)
 
     def _show_page(self, key):
         if self._active_page == key:
@@ -927,19 +910,26 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         # atualiza destaque da sidebar
         for k, btn in self._nav_btns.items():
             lbl = self._nav_labels[k]
+            inner = btn.master
+            outer = inner.master
             if k == key:
                 btn.config(fg=C["accent"], bg=C["hover"])
                 lbl.config(fg=C["accent"], bg=C["hover"])
+                inner.config(bg=C["hover"])
+                outer.config(bg=C["hover"])
             else:
                 btn.config(fg=C["fg_dim"], bg=C["sidebar"])
                 lbl.config(fg=C["fg_dim"], bg=C["sidebar"])
+                inner.config(bg=C["sidebar"])
+                outer.config(bg=C["sidebar"])
 
         titles = {
-            "ocr":      ("OCR",        "Converta PDFs escaneados em PDFs pesquisáveis"),
-            "compress": ("Comprimir",  "Reduza o tamanho de PDFs existentes"),
-            "split":    ("Dividir PDF","Separe um PDF em partes individuais"),
-            "merge":    ("Juntar PDF", "Una múltiplos PDFs em um único arquivo"),
-            "about":    ("Sobre",      f"PDF Tools  v{APP_VERSION}"),
+            "ocr":      ("OCR",         "Converta PDFs escaneados em PDFs pesquisáveis"),
+            "compress": ("Comprimir",   "Reduza o tamanho de PDFs existentes"),
+            "word":     ("PDF → Word",  "Converta PDFs em documentos Word editáveis"),
+            "split":    ("Dividir PDF", "Separe um PDF em partes individuais"),
+            "merge":    ("Juntar PDF",  "Una múltiplos PDFs em um único arquivo"),
+            "about":    ("Sobre",       f"PDF Tools  v{APP_VERSION}"),
         }
         t, s = titles[key]
         self._page_title.config(text=t)
@@ -998,12 +988,29 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         sb_ocr.config(command=self.ocr_listbox.yview)
         self.ocr_listbox.grid(row=0, column=0, sticky="nsew")
         sb_ocr.grid(row=0, column=1, sticky="ns")
-        # Drag-and-drop (double-click to remove individual)
         self.ocr_listbox.bind("<Double-Button-1>", lambda _: self._ocr_remove_selected())
+
+        # ── Área de drop visual ───────────────────────────────
+        drop_f = tk.Frame(card, bg=C["input"],
+                          highlightthickness=1,
+                          highlightbackground=C["border"])
+        drop_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 8))
+        drop_lbl = tk.Label(drop_f,
+                            text="⬡  Arraste PDFs aqui  ou  clique em + Adicionar",
+                            font=("Segoe UI", 9), bg=C["input"],
+                            fg=C["fg_dim"], pady=10)
+        drop_lbl.pack()
+        if _HAS_DND:
+            self.ocr_listbox.drop_target_register(TkinterDnD.DND_FILES)
+            self.ocr_listbox.dnd_bind("<<Drop>>", self._ocr_drop_files)
+            drop_f.drop_target_register(TkinterDnD.DND_FILES)
+            drop_f.dnd_bind("<<Drop>>", self._ocr_drop_files)
+            drop_lbl.drop_target_register(TkinterDnD.DND_FILES)
+            drop_lbl.dnd_bind("<<Drop>>", self._ocr_drop_files)
 
         # ── Pasta de saída (opcional) ─────────────────────────
         outdir_f = tk.Frame(card, bg=C["panel"])
-        outdir_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+        outdir_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
         tk.Label(outdir_f, text="Pasta de saída", width=13, anchor="w",
                  font=("Segoe UI", 9), bg=C["panel"],
                  fg=C["fg_dim"]).pack(side="left")
@@ -1019,7 +1026,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
         # ── Idioma + opções ───────────────────────────────────
         cfg_f = tk.Frame(card, bg=C["panel"])
-        cfg_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 14))
+        cfg_f.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 14))
 
         tk.Label(cfg_f, text="Idioma OCR", width=13, anchor="w",
                  font=("Segoe UI", 9), bg=C["panel"],
@@ -1277,48 +1284,53 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             total_pages = len(PyPDF2.PdfReader(fh).pages)
 
         merger = PyPDF2.PdfWriter()
+        try:
+            for pi in range(1, total_pages + 1):
+                base_pct = (fi - 1) / total_files * 100
+                page_pct = pi / total_pages * (100 / total_files)
+                msg = (f"[{fi}/{total_files}] "
+                       f"{os.path.basename(input_pdf)} "
+                       f"— página {pi}/{total_pages}")
+                self.after(0, lambda m=msg: self.compress_status.set(m))
+                self._spinner_status(os.path.basename(input_pdf))
+                self._spinner_page(pi, total_pages)
 
-        for pi in range(1, total_pages + 1):
-            base_pct = (fi - 1) / total_files * 100
-            page_pct = pi / total_pages * (100 / total_files)
-            msg = (f"[{fi}/{total_files}] "
-                   f"{os.path.basename(input_pdf)} "
-                   f"— página {pi}/{total_pages}")
-            self.after(0, lambda m=msg: self.compress_status.set(m))
-            self._spinner_status(f"{os.path.basename(input_pdf)}")
-            self._spinner_page(pi, total_pages)
+                # Convert one page at a time to save memory
+                page_imgs = convert_from_path(
+                    input_pdf, dpi=dpi, poppler_path=poppler_path,
+                    first_page=pi, last_page=pi)
+                pil_img = page_imgs[0]
+                img_w, img_h = pil_img.size
 
-            # Convert one page at a time to save memory
-            page_imgs = convert_from_path(
-                input_pdf, dpi=dpi, poppler_path=poppler_path,
-                first_page=pi, last_page=pi)
-            pil_img = page_imgs[0]
-            img_w, img_h = pil_img.size
+                # Compress image directly to BytesIO (no temp files)
+                img_buf = io.BytesIO()
+                img_rgb = pil_img.convert("RGB")
+                if img_fmt == "JPEG":
+                    img_rgb.save(img_buf, format="JPEG", quality=jpeg_q,
+                                 optimize=True, progressive=True)
+                else:  # PNG
+                    img_rgb.save(img_buf, format="PNG",
+                                 compress_level=9, optimize=True)
+                img_buf.seek(0)
+                del pil_img, page_imgs, img_rgb  # free memory
 
-            # Compress image directly to BytesIO (no temp files)
-            img_buf = io.BytesIO()
-            img_rgb = pil_img.convert("RGB")
-            if img_fmt == "JPEG":
-                img_rgb.save(img_buf, format="JPEG", quality=jpeg_q,
-                             optimize=True, progressive=True)
-            else:  # PNG
-                img_rgb.save(img_buf, format="PNG",
-                             compress_level=9, optimize=True)
-            img_buf.seek(0)
-            del pil_img, page_imgs, img_rgb  # free memory
+                buf = io.BytesIO()
+                c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
+                c.drawImage(ImageReader(img_buf), 0, 0, width=img_w, height=img_h)
+                c.save()
+                img_buf.close()
 
-            buf = io.BytesIO()
-            c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
-            c.drawImage(ImageReader(img_buf), 0, 0, width=img_w, height=img_h)
-            c.save()
+                page_data = buf.getvalue()
+                buf.close()
+                merger.add_page(PyPDF2.PdfReader(io.BytesIO(page_data)).pages[0])
 
-            merger.add_page(PyPDF2.PdfReader(io.BytesIO(buf.getvalue())).pages[0])
+                pct = base_pct + page_pct * 0.95
+                self.after(0, lambda p=pct: self.compress_pb.set(p))
 
-            pct = base_pct + page_pct * 0.95
-            self.after(0, lambda p=pct: self.compress_pb.set(p))
-
-        with open(output_pdf, "wb") as f:
-            merger.write(f)
+            with open(output_pdf, "wb") as f:
+                merger.write(f)
+        finally:
+            merger.close()
 
         return os.path.getsize(input_pdf) // 1024, \
                os.path.getsize(output_pdf) // 1024
@@ -1375,7 +1387,241 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._compress_running = False
         self.after(0, lambda: self.btn_compress.config(state="normal"))
 
-    # ── Em breve ──────────────────────────────────────────────
+    # ── Página PDF → Word ──────────────────────────────────────
+
+    def _build_word_page(self):
+        page = tk.Frame(self._pages, bg=C["bg"])
+        self._page_frames["word"] = page
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, weight=1)
+
+        card = tk.Frame(page, bg=C["panel"],
+                        highlightthickness=1,
+                        highlightbackground=C["border"])
+        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.columnconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)
+
+        # ── Cabeçalho ─────────────────────────────────────────
+        hdr = tk.Frame(card, bg=C["panel"])
+        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
+        tk.Label(hdr, text="Arquivos PDF para converter em Word",
+                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
+                 fg=C["fg"]).pack(side="left")
+        self._word_count_lbl = tk.Label(
+            hdr, text="(0 arquivo)", font=("Segoe UI", 9),
+            bg=C["panel"], fg=C["fg_dim"])
+        self._word_count_lbl.pack(side="left", padx=(6, 0))
+        _flat_btn(hdr, "✕ Remover", self._word_remove_selected,
+                  padx=8, pady=2).pack(side="right")
+        _flat_btn(hdr, "+ Adicionar", self._word_add_files,
+                  padx=8, pady=2).pack(side="right", padx=(0, 4))
+
+        # ── Listbox ───────────────────────────────────────────
+        list_f = tk.Frame(card, bg=C["panel"])
+        list_f.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 8))
+        list_f.columnconfigure(0, weight=1)
+        list_f.rowconfigure(0, weight=1)
+
+        sb_w = ttk.Scrollbar(list_f, orient="vertical",
+                              style="Dark.Vertical.TScrollbar")
+        self._word_listbox = tk.Listbox(
+            list_f,
+            bg=C["input"], fg=C["fg"],
+            selectbackground=C["sel"], selectforeground=C["fg_bright"],
+            relief="flat", highlightthickness=2,
+            highlightbackground=C["border"],
+            highlightcolor=C["accent"],
+            font=("Segoe UI", 10), activestyle="none",
+            selectmode="extended",
+            yscrollcommand=sb_w.set,
+        )
+        sb_w.config(command=self._word_listbox.yview)
+        self._word_listbox.grid(row=0, column=0, sticky="nsew")
+        sb_w.grid(row=0, column=1, sticky="ns")
+        self._word_listbox.bind(
+            "<Double-Button-1>", lambda _: self._word_remove_selected())
+
+        # ── Área de drop visual ───────────────────────────────
+        drop_f = tk.Frame(card, bg=C["input"],
+                          highlightthickness=1,
+                          highlightbackground=C["border"])
+        drop_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 8))
+        drop_lbl = tk.Label(drop_f,
+                            text="⬢  Arraste PDFs aqui  ou  clique em + Adicionar",
+                            font=("Segoe UI", 9), bg=C["input"],
+                            fg=C["fg_dim"], pady=10)
+        drop_lbl.pack()
+        if _HAS_DND:
+            self._word_listbox.drop_target_register(TkinterDnD.DND_FILES)
+            self._word_listbox.dnd_bind("<<Drop>>", self._word_drop_files)
+            drop_f.drop_target_register(TkinterDnD.DND_FILES)
+            drop_f.dnd_bind("<<Drop>>", self._word_drop_files)
+            drop_lbl.drop_target_register(TkinterDnD.DND_FILES)
+            drop_lbl.dnd_bind("<<Drop>>", self._word_drop_files)
+
+        # ── Pasta de saída ────────────────────────────────────
+        outdir_f = tk.Frame(card, bg=C["panel"])
+        outdir_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 14))
+        tk.Label(outdir_f, text="Pasta de saída", width=13, anchor="w",
+                 font=("Segoe UI", 9), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left")
+        e_wout = tk.Entry(outdir_f, textvariable=self._word_outdir,
+                          state="readonly", font=("Segoe UI", 9), width=42)
+        _style_entry(e_wout)
+        e_wout.pack(side="left", ipady=4, padx=(0, 8))
+        _flat_btn(outdir_f, "Pasta", self._browse_word_outdir,
+                  padx=10, pady=3).pack(side="left")
+        tk.Label(outdir_f, text="(vazio = mesma pasta do PDF)",
+                 font=("Segoe UI", 8), bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left", padx=(8, 0))
+
+        # ── Status + barra + botões ───────────────────────────
+        bottom = tk.Frame(page, bg=C["bg"])
+        bottom.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        bottom.columnconfigure(0, weight=1)
+
+        tk.Label(bottom, textvariable=self._word_status,
+                 font=("Segoe UI", 9), bg=C["bg"], fg=C["fg_dim"],
+                 anchor="w").grid(row=0, column=0, sticky="ew", pady=(4, 4))
+
+        self._word_pb = CanvasProgressBar(bottom, height=6)
+        self._word_pb.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+
+        btn_f = tk.Frame(bottom, bg=C["bg"])
+        btn_f.grid(row=2, column=0, sticky="w")
+        self.btn_word = _accent_btn(
+            btn_f, text="  ⬢  Converter para Word  ",
+            command=self._start_word,
+            font=("Segoe UI", 10, "bold"),
+            padx=18, pady=9,
+        )
+        self.btn_word.pack(side="left", padx=(0, 10))
+        _flat_btn(btn_f, text="Limpar lista",
+                  command=self._clear_word,
+                  padx=14, pady=9).pack(side="left")
+
+    # ── Word eventos ─────────────────────────────────────────
+
+    def _word_add_files(self):
+        paths = filedialog.askopenfilenames(
+            title="Selecionar PDFs para converter",
+            filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
+        )
+        self._word_insert_paths(paths)
+
+    def _word_drop_files(self, event):
+        raw = event.data
+        paths = re.findall(r'\{([^}]+)\}|(\S+)', raw)
+        flat = [p[0] or p[1] for p in paths]
+        pdf_paths = [p for p in flat if p.lower().endswith(".pdf")]
+        self._word_insert_paths(pdf_paths)
+
+    def _word_insert_paths(self, paths):
+        for p in paths:
+            if p not in self._word_files:
+                self._word_files.append(p)
+                self._word_listbox.insert(tk.END, os.path.basename(p))
+        self._update_word_count()
+
+    def _word_remove_selected(self):
+        sel = list(self._word_listbox.curselection())
+        for idx in reversed(sel):
+            self._word_listbox.delete(idx)
+            del self._word_files[idx]
+        self._update_word_count()
+
+    def _browse_word_outdir(self):
+        d = filedialog.askdirectory(title="Pasta de saída para arquivos Word")
+        if d:
+            self._word_outdir.set(d)
+
+    def _update_word_count(self):
+        n = len(self._word_files)
+        self._word_count_lbl.config(
+            text=f"({n} arquivo{'s' if n != 1 else ''})")
+
+    def _clear_word(self):
+        self._word_files.clear()
+        self._word_listbox.delete(0, tk.END)
+        self._word_pb.set(0)
+        self._word_outdir.set("")
+        self._word_status.set("Adicione PDFs para converter.")
+        self._update_word_count()
+
+    def _start_word(self):
+        if not DEPS_OK:
+            self._show_dep_error()
+            return
+        if not self._word_files:
+            messagebox.showwarning("Aviso", "Adicione ao menos um PDF.")
+            return
+        if self._word_running:
+            return
+
+        self._word_running = True
+        self.btn_word.config(state="disabled")
+        self._word_pb.set(0)
+        self._spinner = SpinnerWindow(self)
+        self._spinner.start()
+        threading.Thread(
+            target=self._run_word_batch,
+            args=(list(self._word_files), self._word_outdir.get()),
+            daemon=True,
+        ).start()
+
+    def _run_word_batch(self, files, outdir):
+        total = len(files)
+        ok_files, errors = [], []
+
+        for fi, input_pdf in enumerate(files, 1):
+            base = os.path.splitext(os.path.basename(input_pdf))[0]
+            dest_dir = outdir if outdir else os.path.dirname(input_pdf)
+            output_docx = os.path.join(dest_dir, base + ".docx")
+            basename = os.path.basename(input_pdf)
+            try:
+                self._spinner_status(f"[{fi}/{total}] {basename}")
+                self.after(0, lambda m=f"[{fi}/{total}] Convertendo {basename}...":
+                           self._word_status.set(m))
+
+                cv = Converter(input_pdf)
+                try:
+                    cv.convert(output_docx)
+                finally:
+                    cv.close()
+
+                ok_files.append(output_docx)
+            except Exception as e:
+                errors.append(f"{basename}: {e}")
+
+            pct = fi / total * 100
+            self.after(0, lambda p=pct: self._word_pb.set(p))
+
+        self.after(0, lambda: self._word_pb.set(100))
+        self.after(0, self._close_spinner)
+
+        if errors:
+            err_list = "\n".join(errors)
+            self.after(0, lambda: self._word_status.set(
+                f"Concluído com {len(errors)} erro(s)."))
+            self.after(0, lambda: messagebox.showwarning(
+                "Conversão concluída com erros",
+                f"{len(ok_files)} arquivo(s) convertido(s) com sucesso.\n\n"
+                f"Erros:\n{err_list}"
+            ))
+        else:
+            listing = "\n".join(os.path.basename(p) for p in ok_files)
+            self.after(0, lambda: self._word_status.set(
+                f"Concluído! {total} arquivo(s) convertido(s)."))
+            self.after(0, lambda: messagebox.showinfo(
+                "Conversão concluída",
+                f"{total} arquivo(s) Word gerado(s)!\n\n{listing}"
+            ))
+
+        self._word_running = False
+        self.after(0, lambda: self.btn_word.config(state="normal"))
+
+    # ── Página Dividir ───────────────────────────────────────
 
     def _build_split_page(self):
         page = tk.Frame(self._pages, bg=C["bg"])
@@ -1405,40 +1651,31 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
         tk.Frame(inner, bg=C["border"], height=1).grid(row=1, column=0, sticky="ew", pady=(0, 12))
 
-        # ── Preview + controles lado a lado ──────────────────────
-        content_f = tk.Frame(inner, bg=C["panel"])
-        content_f.grid(row=2, column=0, sticky="nsew", pady=(0, 8))
-        content_f.columnconfigure(0, weight=1)
+        # ── Modo de divisão (compacto, acima da prévia) ─────────────
+        mode_f = tk.Frame(inner, bg=C["panel"])
+        mode_f.grid(row=2, column=0, sticky="ew", pady=(0, 8))
 
-        # Coluna esquerda: controles
-        controls_f = tk.Frame(content_f, bg=C["panel"])
-        controls_f.pack(side="left", fill="both", expand=True)
-
-        # ── Modo de divisão ──────────────────────────────────────
-        tk.Label(controls_f, text="Modo de divisão",
+        tk.Label(mode_f, text="Modo:",
                  font=("Segoe UI", 9, "bold"), bg=C["panel"],
-                 fg=C["fg"]).pack(anchor="w", pady=(0, 8))
+                 fg=C["fg"]).pack(side="left", padx=(0, 8))
 
         self._split_mode = tk.StringVar(value="single")
-        modes_f = tk.Frame(controls_f, bg=C["panel"])
-        modes_f.pack(anchor="w", pady=(0, 12))
-
         for val, label in [("single", "Intervalo único"),
                            ("multi",  "Múltiplos intervalos"),
-                           ("all",    "Todas as páginas individualmente")]:
+                           ("all",    "Todas individualmente")]:
             tk.Radiobutton(
-                modes_f, text=label, variable=self._split_mode,
+                mode_f, text=label, variable=self._split_mode,
                 value=val, command=self._split_update_mode_ui,
                 bg=C["panel"], fg=C["fg"],
                 selectcolor=C["input"],
                 activebackground=C["panel"], activeforeground=C["accent"],
                 font=("Segoe UI", 9),
                 highlightthickness=0,
-            ).pack(side="left", padx=(0, 20))
+            ).pack(side="left", padx=(0, 14))
 
-        # ── Painel modo único ────────────────────────────────────
-        self._split_single_f = tk.Frame(controls_f, bg=C["panel"])
-        self._split_single_f.pack(anchor="w", pady=(0, 8))
+        # ── Painel modo único (inline nos controles) ─────────────
+        self._split_single_f = tk.Frame(mode_f, bg=C["panel"])
+        self._split_single_f.pack(side="left", padx=(10, 0))
         tk.Label(self._split_single_f, text="De:", font=("Segoe UI", 9),
                  bg=C["panel"], fg=C["fg_dim"]).pack(side="left")
         self._split_from = tk.StringVar(value="1")
@@ -1455,7 +1692,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         e_to.pack(side="left", ipady=3, padx=(4, 0))
 
         # ── Painel múltiplos intervalos ──────────────────────────
-        self._split_multi_f = tk.Frame(controls_f, bg=C["panel"])
+        self._split_multi_f = tk.Frame(inner, bg=C["panel"])
         # Starts hidden; shown via _split_update_mode_ui
 
         # campo de texto livre
@@ -1476,17 +1713,18 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         _flat_btn(self._split_multi_f, "+ Adicionar intervalo",
                   self._split_add_interval_row, padx=8, pady=2).pack(anchor="w")
 
-        # Coluna direita: preview
-        preview_f = tk.Frame(content_f, bg=C["input"],
+        # ── Prévia (ocupa o espaço principal) ────────────────────
+        inner.rowconfigure(4, weight=1)
+        preview_f = tk.Frame(inner, bg=C["input"],
                              highlightthickness=1,
                              highlightbackground=C["border"])
-        preview_f.pack(side="right", padx=(16, 0))
+        preview_f.grid(row=4, column=0, sticky="nsew", pady=(0, 8))
 
         self._split_preview_lbl = tk.Label(
             preview_f, text="Pré-visualização",
-            font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
+            font=("Segoe UI", 9), bg=C["input"], fg=C["fg_dim"],
             anchor="center")
-        self._split_preview_lbl.pack(padx=8, pady=8)
+        self._split_preview_lbl.pack(fill="both", expand=True, padx=8, pady=8)
         self._split_preview_photo = None  # keep reference
 
         # Navegação de páginas no preview
@@ -1504,10 +1742,10 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._split_preview_current = 1
 
         # ── Destino ──────────────────────────────────────────────
-        tk.Frame(inner, bg=C["border"], height=1).grid(row=3, column=0, sticky="ew", pady=(4, 10))
+        tk.Frame(inner, bg=C["border"], height=1).grid(row=5, column=0, sticky="ew", pady=(4, 10))
 
         dest_f = tk.Frame(inner, bg=C["panel"])
-        dest_f.grid(row=4, column=0, sticky="ew", pady=(0, 12))
+        dest_f.grid(row=6, column=0, sticky="ew", pady=(0, 12))
         self._split_same_dir = tk.BooleanVar(value=True)
         tk.Checkbutton(
             dest_f, text="Salvar na mesma pasta do arquivo original",
@@ -1523,13 +1761,13 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._split_status = tk.StringVar(value="Selecione um PDF para dividir.")
         tk.Label(inner, textvariable=self._split_status,
                  font=("Segoe UI", 9), bg=C["panel"],
-                 fg=C["fg_dim"], anchor="w").grid(row=5, column=0, sticky="ew", pady=(0, 4))
+                 fg=C["fg_dim"], anchor="w").grid(row=7, column=0, sticky="ew", pady=(0, 4))
 
         self._split_pb = CanvasProgressBar(inner, height=6)
-        self._split_pb.grid(row=6, column=0, sticky="ew", pady=(0, 10))
+        self._split_pb.grid(row=8, column=0, sticky="ew", pady=(0, 10))
 
         btn_f = tk.Frame(inner, bg=C["panel"])
-        btn_f.grid(row=7, column=0, sticky="w")
+        btn_f.grid(row=9, column=0, sticky="w")
         self.btn_split = _accent_btn(
             btn_f, text="  \u229f  Dividir PDF  ",
             command=self._start_split,
@@ -1570,14 +1808,17 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         self._split_preview_page_var.set(f"{page_num} / {self._split_total_pages}")
         self._split_preview_lbl.config(text="Carregando...", image="")
         self._pdf_thumbnail_async(
-            self._split_pdf_path, page_num, 300,
+            self._split_pdf_path, page_num, 400,
             self._split_set_preview)
 
     def _split_set_preview(self, photo):
         if photo:
-            self._split_preview_photo = photo  # prevent GC
+            old = self._split_preview_photo
+            self._split_preview_photo = photo
             self._split_preview_lbl.config(image=photo, text="")
+            del old  # free previous image
         else:
+            self._split_preview_photo = None
             self._split_preview_lbl.config(text="Erro ao carregar", image="")
 
     def _split_preview_prev(self):
@@ -1595,14 +1836,15 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
     def _split_update_mode_ui(self):
         mode = self._split_mode.get()
         if mode == "single":
-            self._split_single_f.pack(anchor="w", pady=(0, 8))
-            self._split_multi_f.pack_forget()
+            self._split_single_f.pack(side="left", padx=(10, 0))
+            self._split_multi_f.grid_forget()
         elif mode == "multi":
             self._split_single_f.pack_forget()
-            self._split_multi_f.pack(anchor="w", fill="x", pady=(0, 8))
+            self._split_multi_f.grid(row=3, column=0, sticky="ew",
+                                     pady=(0, 8))
         else:  # all
             self._split_single_f.pack_forget()
-            self._split_multi_f.pack_forget()
+            self._split_multi_f.grid_forget()
 
     def _split_add_interval_row(self):
         row_f = tk.Frame(self._split_rows_f, bg=C["panel"])
@@ -1948,9 +2190,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
     def _merge_set_preview(self, photo):
         if photo:
-            self._merge_preview_photo = photo  # prevent GC
+            old = self._merge_preview_photo
+            self._merge_preview_photo = photo
             self._merge_preview_lbl.config(image=photo, text="")
+            del old  # free previous image
         else:
+            self._merge_preview_photo = None
             self._merge_preview_lbl.config(text="Erro ao carregar", image="")
 
     def _merge_reset_preview(self):
@@ -2173,6 +2418,8 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                                    "com destaque automático de nomes de pessoas."),
             ("⊜", "Comprimir",    "Reduz o tamanho de PDFs com opções de\n"
                                    "qualidade (100–250 DPI) e formato (JPEG/PNG)."),
+            ("⬢", "PDF → Word",   "Converte PDFs em documentos Word (.docx)\n"
+                                   "editáveis, preservando formatação e layout."),
             ("⊟", "Dividir PDF",  "Separa um PDF por intervalo único, múltiplos\n"
                                    "intervalos ou todas as páginas individualmente."),
             ("⊞", "Juntar PDF",   "Une múltiplos PDFs em ordem personalizável,\n"
@@ -2256,17 +2503,23 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                  bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
 
         _changelog = [
-            ("⊟", "Dividir PDF",
-             "Separe um PDF em partes: intervalo único, múltiplos\n"
-             "intervalos (campo de texto ou visual) ou todas as\n"
-             "páginas individualmente."),
-            ("⊞", "Juntar PDF",
-             "Una múltiplos PDFs em um único arquivo. Reordene\n"
-             "arrastando com o mouse ou usando os botões ↑↓.\n"
-             "Suporte a drag & drop de arquivos do Explorer."),
-            ("⚙", "Melhorias gerais",
-             "Correções de layout, melhor gerenciamento de recursos\n"
-             "e tratamento de erros aprimorado."),
+            ("⬢", "PDF → Word",
+             "Nova ferramenta: converte PDFs em documentos Word\n"
+             "(.docx) editáveis com preservação de layout.\n"
+             "Suporte a drag & drop e conversão em lote."),
+            ("⬡", "Splash screen aprimorado",
+             "Tela de carregamento com tempo mínimo de exibição\n"
+             "para melhor experiência visual ao iniciar."),
+            ("⬡", "Sidebar fixa",
+             "Barra lateral sempre visível com ícones e rótulos.\n"
+             "Navegação mais rápida entre as ferramentas."),
+            ("⬡", "Drag & drop no OCR",
+             "Arraste PDFs diretamente para a lista de OCR.\n"
+             "Zona visual de drop com suporte a múltiplos arquivos."),
+            ("⚙", "OCR otimizado e correções",
+             "Filtro mediano, PSM 3 automático, threshold elevado.\n"
+             "Recursos fechados corretamente, memória otimizada.\n"
+             "Crash no diálogo de atualização corrigido."),
         ]
 
         cl_f = tk.Frame(cl_inner, bg=C["panel"])
@@ -2302,12 +2555,15 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                 data = json.load(f)
             self.auto_update_var.set(data.get("auto_update", True))
             self.highlight_names_var.set(data.get("highlight_names", True))
+            lang = data.get("ocr_lang")
+            if lang:
+                self.lang.set(lang)
             q = data.get("compress_quality")
             if q and any(p[0] == q for p in self._QUALITY_PRESETS):
                 self.compress_quality.set(q)
-            f = data.get("compress_format")
-            if f and any(x[0] == f for x in self._IMG_FORMATS):
-                self.compress_format.set(f)
+            fmt = data.get("compress_format")
+            if fmt and any(x[0] == fmt for x in self._IMG_FORMATS):
+                self.compress_format.set(fmt)
         except Exception:
             pass
 
@@ -2317,6 +2573,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                 json.dump({
                     "auto_update":      self.auto_update_var.get(),
                     "highlight_names":  self.highlight_names_var.get(),
+                    "ocr_lang":         self.lang.get(),
                     "compress_quality": self.compress_quality.get(),
                     "compress_format":  self.compress_format.get(),
                 }, fp)
@@ -2362,12 +2619,23 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
     def _on_lang_select(self, _event):
         code = self.lang.get().split(" — ")[0]
         self.lang.set(code)
+        self._save_prefs()
 
     def _ocr_add_files(self):
         paths = filedialog.askopenfilenames(
             title="Selecionar PDFs para OCR",
             filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
         )
+        self._ocr_insert_paths(paths)
+
+    def _ocr_drop_files(self, event):
+        raw = event.data
+        paths = re.findall(r'\{([^}]+)\}|(\S+)', raw)
+        flat = [p[0] or p[1] for p in paths]
+        pdf_paths = [p for p in flat if p.lower().endswith(".pdf")]
+        self._ocr_insert_paths(pdf_paths)
+
+    def _ocr_insert_paths(self, paths):
         for p in paths:
             if p not in self.ocr_files:
                 self.ocr_files.append(p)
@@ -2480,11 +2748,14 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
     def _preprocess_for_ocr(pil_img):
         """Preprocessa imagem para melhorar precisão do OCR.
 
-        Pipeline: grayscale → contraste → nitidez → binarização Otsu.
+        Pipeline: grayscale → redução de ruído → contraste → nitidez → binarização Otsu.
         Retorna imagem processada no mesmo tamanho da original.
         """
         # Converter para escala de cinza
         gray = pil_img.convert("L")
+
+        # Reduzir ruído de digitalização com filtro mediano
+        gray = gray.filter(ImageFilter.MedianFilter(size=3))
 
         # Aumentar contraste
         enhancer = ImageEnhance.Contrast(gray)
@@ -2497,7 +2768,6 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         # Calcula threshold pelo histograma
         hist = gray.histogram()
         total = sum(hist)
-        current = 0
         threshold = 128
         weight_bg = 0
         sum_bg = 0
@@ -2530,95 +2800,107 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         with open(input_pdf, "rb") as fh:
             total_pages = len(PyPDF2.PdfReader(fh).pages)
 
-        # Tesseract config: OEM 3 (best available), PSM 6 (block of text)
-        tess_config = "--oem 3 --psm 6"
+        # Tesseract config: OEM 3 (best available), PSM 3 (fully automatic)
+        tess_config = "--oem 3 --psm 3"
 
+        basename = os.path.basename(input_pdf)
         merger = PyPDF2.PdfWriter()
+        try:
+            for pi in range(1, total_pages + 1):
+                self._spinner_status(
+                    f"[{fi}/{total_files}] OCR — {basename}")
+                self._spinner_page(pi, total_pages)
+                self._set_status(
+                    f"[{fi}/{total_files}] {basename} "
+                    f"— página {pi}/{total_pages}")
 
-        for pi in range(1, total_pages + 1):
+                # Convert one page at a time to save memory
+                page_imgs = convert_from_path(
+                    input_pdf, dpi=300, poppler_path=poppler_path,
+                    first_page=pi, last_page=pi)
+                pil_img = page_imgs[0]
+                img_w, img_h = pil_img.size
+
+                # Preprocessar imagem para melhorar OCR
+                ocr_img = self._preprocess_for_ocr(pil_img)
+
+                ocr_data = pytesseract.image_to_data(
+                    ocr_img, lang=lang,
+                    config=tess_config,
+                    output_type=pytesseract.Output.DICT)
+                del ocr_img  # free preprocessed image
+
+                buf = io.BytesIO()
+                c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
+                # Draw original (non-preprocessed) image for visual fidelity
+                c.drawImage(ImageReader(pil_img), 0, 0,
+                            width=img_w, height=img_h)
+                del pil_img, page_imgs  # free memory immediately
+
+                if highlight_names:
+                    name_boxes = self._detect_names(ocr_data)
+                    if name_boxes:
+                        c.saveState()
+                        c.setFillColorRGB(1.0, 0.85, 0.0, alpha=0.35)
+                        for nx, ny, nw, nh in name_boxes:
+                            pad = 2
+                            c.rect(nx - pad, img_h - ny - nh - pad,
+                                   nw + pad * 2, nh + pad * 2,
+                                   fill=1, stroke=0)
+                        c.restoreState()
+
+                # Invisible text layer — minimum confidence threshold 30
+                c.setFillColorRGB(0, 0, 0, alpha=0)
+                texts = ocr_data["text"]
+                confs = ocr_data["conf"]
+                lefts = ocr_data["left"]
+                tops = ocr_data["top"]
+                widths = ocr_data["width"]
+                heights = ocr_data["height"]
+                for j in range(len(texts)):
+                    word = texts[j]
+                    if not word or not word.strip():
+                        continue
+                    try:
+                        conf = int(confs[j])
+                    except (TypeError, ValueError):
+                        continue
+                    if conf < 30:
+                        continue
+                    x, y = lefts[j], tops[j]
+                    w, h = widths[j], heights[j]
+                    if h <= 0 or w <= 0:
+                        continue
+                    font_size = max(h * 0.85, 1)
+                    try:
+                        c.setFont("Helvetica", font_size)
+                        tw = c.stringWidth(word, "Helvetica", font_size)
+                        sx = w / tw if tw > 0 else 1
+                        c.saveState()
+                        c.transform(sx, 0, 0, 1, x, img_h - y - h)
+                        c.drawString(0, 0, word)
+                        c.restoreState()
+                    except Exception:
+                        pass
+
+                c.save()
+                page_data = buf.getvalue()
+                buf.close()
+                merger.add_page(PyPDF2.PdfReader(io.BytesIO(page_data)).pages[0])
+
+                # Progresso global
+                base_pct = (fi - 1) / total_files * 95
+                page_pct = pi / total_pages * (95 / total_files)
+                pct = base_pct + page_pct
+                self.after(0, lambda p=pct: (
+                    self.progress_var.set(p), self.pb.set(p)))
+
             self._spinner_status(
-                f"[{fi}/{total_files}] OCR — "
-                f"{os.path.basename(input_pdf)}")
-            self._spinner_page(pi, total_pages)
-            self._set_status(
-                f"[{fi}/{total_files}] {os.path.basename(input_pdf)} "
-                f"— página {pi}/{total_pages}")
-
-            # Convert one page at a time to save memory
-            page_imgs = convert_from_path(
-                input_pdf, dpi=300, poppler_path=poppler_path,
-                first_page=pi, last_page=pi)
-            pil_img = page_imgs[0]
-            img_w, img_h = pil_img.size
-
-            # Preprocessar imagem para melhorar OCR
-            ocr_img = self._preprocess_for_ocr(pil_img)
-
-            ocr_data = pytesseract.image_to_data(
-                ocr_img, lang=lang,
-                config=tess_config,
-                output_type=pytesseract.Output.DICT)
-            del ocr_img  # free preprocessed image
-
-            buf = io.BytesIO()
-            c = rl_canvas.Canvas(buf, pagesize=(img_w, img_h))
-            # Draw original (non-preprocessed) image for visual fidelity
-            c.drawImage(ImageReader(pil_img), 0, 0,
-                        width=img_w, height=img_h)
-            del pil_img, page_imgs  # free memory immediately
-
-            if highlight_names:
-                name_boxes = self._detect_names(ocr_data)
-                if name_boxes:
-                    c.saveState()
-                    c.setFillColorRGB(1.0, 0.85, 0.0, alpha=0.35)
-                    for nx, ny, nw, nh in name_boxes:
-                        pad = 2
-                        c.rect(nx - pad, img_h - ny - nh - pad,
-                               nw + pad * 2, nh + pad * 2,
-                               fill=1, stroke=0)
-                    c.restoreState()
-
-            # Invisible text layer — minimum confidence threshold 20
-            c.setFillColorRGB(0, 0, 0, alpha=0)
-            for j in range(len(ocr_data["text"])):
-                word = ocr_data["text"][j]
-                try:
-                    conf = int(ocr_data["conf"][j])
-                except (TypeError, ValueError):
-                    conf = -1
-                if not word or not word.strip() or conf < 20:
-                    continue
-                x, y = ocr_data["left"][j], ocr_data["top"][j]
-                w, h = ocr_data["width"][j], ocr_data["height"][j]
-                if h <= 0 or w <= 0:
-                    continue
-                font_size = max(h * 0.85, 1)
-                try:
-                    c.setFont("Helvetica", font_size)
-                    tw = c.stringWidth(word, "Helvetica", font_size)
-                    sx = w / tw if tw > 0 else 1
-                    c.saveState()
-                    c.transform(sx, 0, 0, 1, x, img_h - y - h)
-                    c.drawString(0, 0, word)
-                    c.restoreState()
-                except Exception:
-                    pass
-
-            c.save()
-            merger.add_page(PyPDF2.PdfReader(io.BytesIO(buf.getvalue())).pages[0])
-
-            # Progresso global
-            base_pct = (fi - 1) / total_files * 95
-            page_pct = pi / total_pages * (95 / total_files)
-            pct = base_pct + page_pct
-            self.after(0, lambda p=pct: (
-                self.progress_var.set(p), self.pb.set(p)))
-
-        self._spinner_status(
-            f"[{fi}/{total_files}] Gerando PDF...")
-        with open(output_pdf, "wb") as f:
-            merger.write(f)
+                f"[{fi}/{total_files}] Gerando PDF...")
+            with open(output_pdf, "wb") as f:
+                merger.write(f)
+        finally:
+            merger.close()
 
     def _detect_names(self, ocr_data):
         """
@@ -2632,13 +2914,23 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                  "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto",
                  "Setembro", "Outubro", "Novembro", "Dezembro"})
 
+        # Extract arrays once to avoid repeated dict lookups
+        texts = ocr_data["text"]
+        confs = ocr_data["conf"]
+        lefts = ocr_data["left"]
+        tops = ocr_data["top"]
+        widths = ocr_data["width"]
+        heights = ocr_data["height"]
+        line_nums = ocr_data["line_num"]
+        block_nums = ocr_data["block_num"]
+
         names = []
-        n = len(ocr_data["text"])
+        n = len(texts)
         i = 0
         while i < n:
-            word = ocr_data["text"][i]
+            word = texts[i]
             try:
-                conf = int(ocr_data["conf"][i])
+                conf = int(confs[i])
             except (TypeError, ValueError):
                 conf = -1
             if not word or not word.strip() or conf <= 0:
@@ -2651,17 +2943,13 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                 group = [i]
                 j = i + 1
                 while j < n:
-                    nw = ocr_data["text"][j]
+                    nw = texts[j]
                     try:
-                        nc = int(ocr_data["conf"][j])
+                        nc = int(confs[j])
                     except (TypeError, ValueError):
                         nc = -1
                     # Mesma linha e mesmo bloco
-                    same_line = (
-                        ocr_data["line_num"][j] == ocr_data["line_num"][i]
-                        and ocr_data["block_num"][j] == ocr_data["block_num"][i]
-                    )
-                    if not same_line:
+                    if line_nums[j] != line_nums[i] or block_nums[j] != block_nums[i]:
                         break
                     if not nw or not nw.strip():
                         j += 1
@@ -2680,12 +2968,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                         break
                 # Conta palavras reais (sem conectores)
                 real = [k for k in group
-                        if ocr_data["text"][k].lower() not in _CONNECTORS]
+                        if texts[k].lower() not in _CONNECTORS]
                 if len(real) >= 2:
-                    xs  = [ocr_data["left"][k] for k in group]
-                    ys  = [ocr_data["top"][k]  for k in group]
-                    x2s = [ocr_data["left"][k] + ocr_data["width"][k]  for k in group]
-                    y2s = [ocr_data["top"][k]  + ocr_data["height"][k] for k in group]
+                    xs  = [lefts[k] for k in group]
+                    ys  = [tops[k]  for k in group]
+                    x2s = [lefts[k] + widths[k]  for k in group]
+                    y2s = [tops[k]  + heights[k] for k in group]
                     names.append((min(xs), min(ys),
                                   max(x2s) - min(xs),
                                   max(y2s) - min(ys)))
@@ -2696,13 +2984,19 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
     def _spinner_status(self, msg):
         sp = self._spinner
-        if sp:
-            self.after(0, lambda: sp.set_status(msg) if sp._running else None)
+        if sp and sp._running:
+            try:
+                self.after(0, lambda: sp.set_status(msg) if sp._running else None)
+            except Exception:
+                pass
 
     def _spinner_page(self, current, total):
         sp = self._spinner
-        if sp:
-            self.after(0, lambda: sp.set_page(current, total) if sp._running else None)
+        if sp and sp._running:
+            try:
+                self.after(0, lambda: sp.set_page(current, total) if sp._running else None)
+            except Exception:
+                pass
 
     def _close_spinner(self):
         if self._spinner:
@@ -2720,7 +3014,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         messagebox.showerror(
             "Dependências faltando",
             f"Biblioteca não instalada: {missing}\n\n"
-            "Execute:\npip install pytesseract pillow pdf2image reportlab PyPDF2"
+            "Execute:\npip install pytesseract pillow pdf2image reportlab PyPDF2 pdf2docx"
         )
 
 

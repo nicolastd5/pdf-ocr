@@ -30,7 +30,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install Python dependencies
-        run: pip install pyinstaller pytesseract pillow pdf2image reportlab PyPDF2 tkinterdnd2
+        run: pip install pyinstaller pytesseract pillow pdf2image reportlab PyPDF2 pdf2docx tkinterdnd2
 
       # ── Tesseract via Chocolatey (já disponível no runner) ───────────────────
       - name: Install Tesseract via Chocolatey
@@ -190,17 +190,23 @@ jobs:
           body: |
             ## ${{ steps.resolve_tag.outputs.tag }} — PDF Tools
 
-            ### ✦ Animação de processamento em todas as funções
-            Spinner orbital animado agora aparece em Comprimir, Dividir e Juntar — igual ao OCR.
+            ### ✦ PDF → Word
+            Nova ferramenta para converter PDFs em documentos Word (.docx) editáveis, com preservação de layout. Suporte a drag & drop e conversão em lote.
 
-            ### ✦ Pré-visualização maior
-            Thumbnails de Dividir e Juntar aumentados para 300px de altura.
+            ### ✦ Splash screen aprimorado
+            Tela de carregamento com tempo mínimo de 2s para melhor experiência visual.
 
-            ### ✦ Drag & drop externo corrigido
-            Arrastar PDFs do Explorer para a janela de Juntar agora funciona corretamente.
+            ### ✦ Sidebar fixa
+            Barra lateral sempre visível com ícones e rótulos — sem hover toggle.
 
-            ### ✦ Redesign visual completo
-            Nova paleta Ocean/Teal, sidebar expansível, spinner dual orbital e progress bar com gradiente animado.
+            ### ✦ Drag & drop no OCR
+            Arraste PDFs direto para a lista de OCR. Zona visual de drop.
+
+            ### ✦ OCR otimizado
+            Filtro mediano, detecção automática de layout (PSM 3), threshold de confiança elevado. Idioma OCR persiste nas preferências.
+
+            ### ✦ Correções e performance
+            Crash no diálogo de atualização corrigido. Recursos (BytesIO, PdfWriter) fechados corretamente. Gradiente pré-computado. Memória otimizada.
 
             ---
             Veja o [CHANGELOG completo](https://github.com/nicolastd5/pdf-ocr/blob/master/CHANGELOG.md) para o histórico de versões.
