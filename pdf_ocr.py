@@ -694,8 +694,8 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"PDF Tools  v{APP_VERSION}")
-        self.geometry("760x640")
-        self.minsize(760, 580)
+        self.geometry("1200x850")
+        self.minsize(1000, 700)
         self.resizable(True, True)
         self.configure(bg=C["bg"])
 
@@ -2006,6 +2006,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                         highlightbackground=C["border"])
         card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
         card.columnconfigure(0, weight=1)
+        card.columnconfigure(2, weight=2)
         card.rowconfigure(1, weight=1)
 
         inner = tk.Frame(card, bg=C["panel"], padx=20, pady=16)
