@@ -4,6 +4,19 @@ Todas as mudanças significativas neste projeto são documentadas neste arquivo.
 
 ---
 
+## [1.0.7] - 2026-04-02
+
+### 🚀 Migração para PyQt6
+
+- **Nova UI em PyQt6**: Interface completamente reescrita — visual moderno Ocean/Teal, sidebar fixa, `QStackedWidget` para navegação entre abas
+- **Drag & drop nativo**: Sem dependência de `tkinterdnd2`; funciona via eventos padrão do Qt
+- **Workers assíncronos**: Todas as operações (OCR, Comprimir, Dividir, Juntar, PDF→Word) rodam em `QThread` com signals `progress` / `finished` / `error`
+- **SpinnerDialog animado**: Modal com dois círculos orbitais em todas as operações longas
+- **GradientProgressBar**: Barra de progresso gradiente teal→sky em cada aba
+- **Estrutura multi-arquivo**: `pdf_ocr_qt/` com `main.py`, `workers.py`, `styles.py`, `pages/`, `widgets/`
+
+---
+
 ## [1.0.4] - 2026-03-31
 
 ### ✨ Novas Funcionalidades

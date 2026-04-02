@@ -35,7 +35,7 @@ Converter = None        # pdf2docx.Converter
 DEPS_OK = None          # None = not yet loaded; True/False = result
 MISSING_DEP = ""
 
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
