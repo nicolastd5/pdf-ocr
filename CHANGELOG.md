@@ -4,7 +4,7 @@ Todas as mudanças significativas neste projeto são documentadas neste arquivo.
 
 ---
 
-## [1.0.7] - 2026-04-02
+## [1.0.7a] - 2026-04-02
 
 ### 🚀 Migração para PyQt6
 

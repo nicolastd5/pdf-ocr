@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from pdf_ocr_qt.styles import flat_btn, accent_btn, C
 
-APP_VERSION      = "1.0.7"
+APP_VERSION      = "1.0.7a"
 GITHUB_RELEASES_PAGE = "https://github.com/nicolastd5/pdf-ocr/releases"
 
 
