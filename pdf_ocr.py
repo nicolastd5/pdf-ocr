@@ -2006,17 +2006,16 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                         highlightbackground=C["border"])
         card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
         card.columnconfigure(0, weight=1)
-        card.columnconfigure(2, weight=2)
         card.rowconfigure(1, weight=1)
 
         inner = tk.Frame(card, bg=C["panel"], padx=20, pady=16)
         inner.pack(fill="both", expand=True)
         inner.columnconfigure(0, weight=1)
-        inner.rowconfigure(1, weight=1)
+        inner.rowconfigure(3, weight=1)
 
         # ── Cabeçalho / botões ───────────────────────────────────
         hdr = tk.Frame(inner, bg=C["panel"])
-        hdr.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        hdr.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         tk.Label(hdr, text="PDFs para juntar",
                  font=("Segoe UI", 9, "bold"), bg=C["panel"],
                  fg=C["fg"]).pack(side="left")
@@ -2029,11 +2028,14 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         _flat_btn(hdr, "+ Adicionar PDFs", self._merge_add_files,
                   padx=8, pady=2).pack(side="right", padx=(0, 4))
 
-        # ── Listbox ──────────────────────────────────────────────
-        list_f = tk.Frame(inner, bg=C["panel"])
-        list_f.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
+        # ── Listbox + botões ↑↓ (topo, altura fixa) ─────────────
+        list_outer = tk.Frame(inner, bg=C["panel"])
+        list_outer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        list_outer.columnconfigure(0, weight=1)
+
+        list_f = tk.Frame(list_outer, bg=C["panel"])
+        list_f.grid(row=0, column=0, sticky="ew")
         list_f.columnconfigure(0, weight=1)
-        list_f.rowconfigure(0, weight=1)
 
         sb = ttk.Scrollbar(list_f, orient="vertical",
                            style="Dark.Vertical.TScrollbar")
@@ -2046,9 +2048,10 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             highlightcolor=C["accent"],
             font=("Segoe UI", 10), activestyle="none",
             yscrollcommand=sb.set,
+            height=5,
         )
         sb.config(command=self._merge_listbox.yview)
-        self._merge_listbox.grid(row=0, column=0, sticky="nsew")
+        self._merge_listbox.grid(row=0, column=0, sticky="ew")
         sb.grid(row=0, column=1, sticky="ns")
 
         # Drag & drop interno (reordenação com mouse)
@@ -2063,38 +2066,19 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             self._merge_listbox.drop_target_register(TkinterDnD.DND_FILES)
             self._merge_listbox.dnd_bind("<<Drop>>", self._merge_drop_files)
 
-        # ── Botões ↑ ↓ ──────────────────────────────────────────
-        ord_f = tk.Frame(inner, bg=C["panel"])
-        ord_f.grid(row=1, column=1, sticky="ns", padx=(8, 0), pady=(0, 8))
+        # ── Botões ↑ ↓ (inline à direita da listbox) ────────────
+        ord_f = tk.Frame(list_outer, bg=C["panel"])
+        ord_f.grid(row=0, column=1, sticky="ns", padx=(8, 0))
         _flat_btn(ord_f, "↑", self._merge_move_up,
                   padx=10, pady=6).pack(pady=(0, 4))
         _flat_btn(ord_f, "↓", self._merge_move_down,
                   padx=10, pady=6).pack()
 
-        # ── Preview panel (right side) ───────────────────────────
-        preview_f = tk.Frame(inner, bg=C["input"],
-                             highlightthickness=1,
-                             highlightbackground=C["border"])
-        preview_f.grid(row=1, column=2, sticky="ns", padx=(8, 0), pady=(0, 8))
-
-        self._merge_preview_lbl = tk.Label(
-            preview_f, text="Selecione um PDF\npara pré-visualizar",
-            font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
-            anchor="center")
-        self._merge_preview_lbl.pack(padx=8, pady=8, expand=True)
-        self._merge_preview_photo = None  # keep reference
-
-        self._merge_preview_name = tk.Label(
-            preview_f, text="",
-            font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
-            wraplength=160)
-        self._merge_preview_name.pack(padx=8, pady=(0, 8))
-
         # ── Área de drop visual ──────────────────────────────────
         drop_f = tk.Frame(inner, bg=C["input"],
                           highlightthickness=1,
                           highlightbackground=C["border"])
-        drop_f.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(0, 10))
+        drop_f.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         drop_lbl = tk.Label(drop_f,
                             text="⊞  Arraste PDFs aqui  ou  clique em + Adicionar PDFs",
                             font=("Segoe UI", 9), bg=C["input"],
@@ -2106,12 +2090,33 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             drop_lbl.drop_target_register(TkinterDnD.DND_FILES)
             drop_lbl.dnd_bind("<<Drop>>", self._merge_drop_files)
 
+        # ── Preview (ocupa o espaço principal) ───────────────────
+        preview_f = tk.Frame(inner, bg=C["input"],
+                             highlightthickness=1,
+                             highlightbackground=C["border"])
+        preview_f.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(0, 8))
+        preview_f.rowconfigure(0, weight=1)
+        preview_f.columnconfigure(0, weight=1)
+
+        self._merge_preview_lbl = tk.Label(
+            preview_f, text="Selecione um PDF\npara pré-visualizar",
+            font=("Segoe UI", 9), bg=C["input"], fg=C["fg_dim"],
+            anchor="center")
+        self._merge_preview_lbl.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        self._merge_preview_photo = None  # keep reference
+
+        self._merge_preview_name = tk.Label(
+            preview_f, text="",
+            font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
+            wraplength=300)
+        self._merge_preview_name.grid(row=1, column=0, pady=(0, 8))
+
         # ── Destino ──────────────────────────────────────────────
         tk.Frame(inner, bg=C["border"], height=1).grid(
-            row=3, column=0, columnspan=3, sticky="ew", pady=(0, 10))
+            row=4, column=0, columnspan=2, sticky="ew", pady=(0, 10))
 
         dest_f = tk.Frame(inner, bg=C["panel"])
-        dest_f.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(0, 12))
+        dest_f.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(0, 12))
         self._merge_same_dir = tk.BooleanVar(value=True)
         tk.Checkbutton(
             dest_f, text="Salvar na mesma pasta do primeiro PDF",
@@ -2128,13 +2133,13 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         tk.Label(inner, textvariable=self._merge_status,
                  font=("Segoe UI", 9), bg=C["panel"],
                  fg=C["fg_dim"], anchor="w").grid(
-            row=5, column=0, columnspan=3, sticky="ew", pady=(0, 4))
+            row=6, column=0, columnspan=2, sticky="ew", pady=(0, 4))
 
         self._merge_pb = CanvasProgressBar(inner, height=6)
-        self._merge_pb.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 10))
+        self._merge_pb.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(0, 10))
 
         btn_f = tk.Frame(inner, bg=C["panel"])
-        btn_f.grid(row=7, column=0, columnspan=3, sticky="w")
+        btn_f.grid(row=8, column=0, columnspan=2, sticky="w")
         self.btn_merge = _accent_btn(
             btn_f, text="  ⊞  Juntar PDFs  ",
             command=self._start_merge,
