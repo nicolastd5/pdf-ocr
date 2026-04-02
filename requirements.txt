@@ -1,5 +1,6 @@
+PyQt6
 pytesseract
-pillow
+Pillow
 pdf2image
 reportlab
 PyPDF2
