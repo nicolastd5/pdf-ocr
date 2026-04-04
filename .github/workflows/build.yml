@@ -151,17 +151,18 @@ jobs:
 
       # ── Diagnóstico spaCy (mostra onde os arquivos do modelo vão no _MEIPASS) ──
       - name: Diagnose spaCy bundle paths
+        shell: pwsh
         run: |
-          python - <<'EOF'
+          python -c @"
           import spacy, os
           from PyInstaller.utils.hooks import collect_data_files
-          model_path = spacy.util.get_package_path("pt_core_news_lg")
-          print("=== model_path:", model_path)
-          datas = collect_data_files("pt_core_news_lg")
-          print(f"=== collect_data_files produced {len(datas)} entries ===")
+          model_path = spacy.util.get_package_path('pt_core_news_lg')
+          print('=== model_path:', model_path)
+          datas = collect_data_files('pt_core_news_lg')
+          print(f'=== collect_data_files produced {len(datas)} entries ===')
           for src, dst in sorted(datas, key=lambda x: x[1]):
-              print(f"  DST={dst!r:40s}  SRC={os.path.basename(src)}")
-          EOF
+              print(f'  DST={dst!r:40s}  FILE={os.path.basename(src)}')
+          "@
 
       # ── Build EXE ────────────────────────────────────────────────────────────
       - name: Build EXE with PyInstaller
