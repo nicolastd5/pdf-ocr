@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from pdf_ocr_qt.styles import flat_btn, accent_btn, C
 
-APP_VERSION      = "1.0.9"
+APP_VERSION      = "2.0.0"
 GITHUB_RELEASES_PAGE = "https://github.com/nicolastd5/pdf-ocr/releases"
 
 
@@ -46,11 +46,11 @@ class AboutPage(QWidget):
         layout.addWidget(cl_title)
 
         changelog = QLabel(
-            "• spaCy integrado diretamente no EXE — sem instalação necessária\n"
-            "• Python 3.12 no build: compatibilidade total com spaCy e wheels nativos\n"
-            "• Modelo pt_core_news_lg embutido no executável\n"
-            "• Eliminado aviso de 'programa não seguro' do Windows durante instalação de IA\n"
-            "• Carregamento do modelo spaCy corrigido ao rodar como EXE congelado"
+            "• Interface completamente reescrita em PyQt6 — mais rápida e moderna\n"
+            "• Versão Tkinter removida: PDF Tools agora é 100% PyQt6\n"
+            "• spaCy e modelo pt_core_news_lg embutidos diretamente no EXE\n"
+            "• Detecção de nomes por IA sem nenhuma instalação adicional\n"
+            "• Limpeza de código: imports e funções não utilizadas removidos"
         )
         changelog.setObjectName("dim_lbl")
         changelog.setWordWrap(True)

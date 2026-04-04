@@ -251,7 +251,6 @@ class CompressWorker(QThread):
     def run(self):
         total = len(self.files)
         results, errors = [], []
-        tmp_suffix = ".jpg" if self.img_fmt == "JPEG" else ".png"
 
         for fi, input_pdf in enumerate(self.files, 1):
             base     = os.path.splitext(os.path.basename(input_pdf))[0]

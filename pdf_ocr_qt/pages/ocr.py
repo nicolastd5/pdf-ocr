@@ -3,7 +3,7 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
     QCheckBox, QComboBox, QFileDialog, QMessageBox, QFrame,
-    QLineEdit, QTreeWidget, QTreeWidgetItem, QSizePolicy
+    QLineEdit, QTreeWidget, QTreeWidgetItem
 )
 from PyQt6.QtGui import QColor, QIcon, QPixmap
 from PyQt6.QtCore import Qt

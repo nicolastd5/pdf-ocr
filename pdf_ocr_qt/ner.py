@@ -250,10 +250,3 @@ class NERPipeline:
         x2 = max(b[0] + b[2] for b in matched)
         y2 = max(b[1] + b[3] for b in matched)
         return (x, y, x2 - x, y2 - y)
-
-
-def _safe_int(v) -> int:
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return -1

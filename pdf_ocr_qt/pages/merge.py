@@ -1,9 +1,9 @@
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QCheckBox, QFileDialog, QMessageBox, QSizePolicy
+    QCheckBox, QFileDialog, QMessageBox, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from pdf_ocr_qt.styles import flat_btn, accent_btn, C
 from pdf_ocr_qt.workers import MergeWorker

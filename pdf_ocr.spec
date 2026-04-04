@@ -25,12 +25,19 @@ if os.path.isdir(tess_root):
         tess_datas.append((tessdata_dir, "tessdata"))
 
 # ── spaCy model data ──────────────────────────────────────────────────────────
+# collect_data_files garante meta.json, config.cfg, .bin, etc.
+# collect_data_files("spacy") captura os dados internos do spaCy (lookups, etc.)
 spacy_datas = []
+spacy_hidden = []
 try:
+    from PyInstaller.utils.hooks import collect_data_files, collect_submodules
     import spacy
     model_path = spacy.util.get_package_path("pt_core_news_lg")
     if os.path.isdir(str(model_path)):
-        spacy_datas.append((str(model_path), "pt_core_news_lg"))
+        spacy_datas += collect_data_files("pt_core_news_lg")
+        spacy_datas += collect_data_files("spacy")
+        spacy_hidden += collect_submodules("spacy")
+        spacy_hidden += collect_submodules("thinc")
 except Exception:
     pass  # spaCy não instalado no ambiente de build — ignorar
 
@@ -71,7 +78,7 @@ a = Analysis(
         'spacy.lang.pt',
         'pt_core_news_lg',
         'openai',
-    ],
+    ] + spacy_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
