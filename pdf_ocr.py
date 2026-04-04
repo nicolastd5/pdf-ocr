@@ -69,6 +69,27 @@ C = {
     "glow":      "#2dd4bf",
 }
 
+# Design tokens (mini UI kit)
+UI = {
+    "s1": 4,
+    "s2": 8,
+    "s3": 12,
+    "s4": 16,
+    "s5": 24,
+    "s6": 32,
+    "font_body": ("Segoe UI", 9),
+    "font_body_sm": ("Segoe UI", 8),
+    "font_title": ("Segoe UI", 11, "bold"),
+    "font_cta": ("Segoe UI", 10, "bold"),
+    "font_list": ("Segoe UI", 10),
+    "entry_ipady": 4,
+    "btn_py": 4,
+    "btn_px": 12,
+    "cta_py": 9,
+    "cta_px": 18,
+    "progress_h": 6,
+}
+
 
 # ─────────────────────────────────────────────────────────────
 #  Carregamento lazy de dependências pesadas
@@ -320,7 +341,7 @@ def _style_entry(e):
 def _flat_btn(parent, text, command, fg=None, bg=None, font=None, **kw):
     fg   = fg   or C["fg"]
     bg   = bg   or C["input"]
-    font = font or ("Segoe UI", 9)
+    font = font or UI["font_body"]
     btn = tk.Button(
         parent, text=text, command=command,
         bg=bg, fg=fg, activebackground=C["sel"],
@@ -339,11 +360,12 @@ def _flat_btn(parent, text, command, fg=None, bg=None, font=None, **kw):
 
 
 def _accent_btn(parent, text, command, font=None, **kw):
-    font = font or ("Segoe UI", 10, "bold")
+    font = font or UI["font_cta"]
     btn = tk.Button(
         parent, text=text, command=command,
         bg=C["accent"], fg="#0f172a",
         activebackground=C["accent2"], activeforeground="#0f172a",
+        disabledforeground=C["fg_dim"], disabledbackground=C["accent_dk"],
         relief="flat", bd=0, cursor="hand2",
         font=font, **kw
     )
@@ -947,28 +969,32 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         card = tk.Frame(page, bg=C["panel"],
                         highlightthickness=1,
                         highlightbackground=C["border"])
-        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.grid(row=0, column=0, sticky="nsew",
+                  padx=UI["s5"], pady=(UI["s5"], UI["s2"]))
         card.columnconfigure(0, weight=1)
         card.rowconfigure(1, weight=1)   # row da listbox expande
 
         # ── Cabeçalho da lista ────────────────────────────────
         hdr = tk.Frame(card, bg=C["panel"])
-        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
+        hdr.grid(row=0, column=0, sticky="ew",
+                 padx=UI["s4"], pady=(UI["s4"], UI["s2"]))
         tk.Label(hdr, text="Arquivos PDF para OCR",
-                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
+                 font=UI["font_title"], bg=C["panel"],
                  fg=C["fg"]).pack(side="left")
         self._ocr_count_lbl = tk.Label(
-            hdr, text="(0 arquivo)", font=("Segoe UI", 9),
+            hdr, text="(0 arquivo)", font=UI["font_body"],
             bg=C["panel"], fg=C["fg_dim"])
-        self._ocr_count_lbl.pack(side="left", padx=(6, 0))
+        self._ocr_count_lbl.pack(side="left", padx=(UI["s2"], 0))
         _flat_btn(hdr, "✕ Remover", self._ocr_remove_selected,
-                  padx=8, pady=2).pack(side="right")
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(side="right")
         _flat_btn(hdr, "+ Adicionar", self._ocr_add_files,
-                  padx=8, pady=2).pack(side="right", padx=(0, 4))
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(
+                      side="right", padx=(0, UI["s1"]))
 
         # ── Listbox ───────────────────────────────────────────
         list_f = tk.Frame(card, bg=C["panel"])
-        list_f.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 8))
+        list_f.grid(row=1, column=0, sticky="nsew",
+                    padx=UI["s4"], pady=(0, UI["s2"]))
         list_f.columnconfigure(0, weight=1)
         list_f.rowconfigure(0, weight=1)
 
@@ -981,7 +1007,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             relief="flat", highlightthickness=2,
             highlightbackground=C["border"],
             highlightcolor=C["accent"],
-            font=("Segoe UI", 10), activestyle="none",
+            font=UI["font_list"], activestyle="none",
             selectmode="extended",
             yscrollcommand=sb_ocr.set,
         )
@@ -994,11 +1020,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         drop_f = tk.Frame(card, bg=C["input"],
                           highlightthickness=1,
                           highlightbackground=C["border"])
-        drop_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 8))
+        drop_f.grid(row=2, column=0, sticky="ew",
+                    padx=UI["s4"], pady=(0, UI["s2"]))
         drop_lbl = tk.Label(drop_f,
                             text="⬡  Arraste PDFs aqui  ou  clique em + Adicionar",
-                            font=("Segoe UI", 9), bg=C["input"],
-                            fg=C["fg_dim"], pady=10)
+                            font=UI["font_body"], bg=C["input"],
+                            fg=C["fg_dim"], pady=UI["s3"])
         drop_lbl.pack()
         if _HAS_DND:
             self.ocr_listbox.drop_target_register(TkinterDnD.DND_FILES)
@@ -1010,30 +1037,32 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
         # ── Pasta de saída (opcional) ─────────────────────────
         outdir_f = tk.Frame(card, bg=C["panel"])
-        outdir_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
+        outdir_f.grid(row=3, column=0, sticky="ew",
+                      padx=UI["s4"], pady=(0, UI["s2"]))
         tk.Label(outdir_f, text="Pasta de saída", width=13, anchor="w",
-                 font=("Segoe UI", 9), bg=C["panel"],
+                 font=UI["font_body"], bg=C["panel"],
                  fg=C["fg_dim"]).pack(side="left")
         e_outdir = tk.Entry(outdir_f, textvariable=self.ocr_outdir,
-                            state="readonly", font=("Segoe UI", 9), width=42)
+                            state="readonly", font=UI["font_body"], width=42)
         _style_entry(e_outdir)
-        e_outdir.pack(side="left", ipady=4, padx=(0, 8))
+        e_outdir.pack(side="left", ipady=UI["entry_ipady"], padx=(0, UI["s2"]))
         _flat_btn(outdir_f, "Pasta", self._browse_ocr_outdir,
-                  padx=10, pady=3).pack(side="left")
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(side="left")
         tk.Label(outdir_f, text="(vazio = mesma pasta do PDF)",
-                 font=("Segoe UI", 8), bg=C["panel"],
-                 fg=C["fg_dim"]).pack(side="left", padx=(8, 0))
+                 font=UI["font_body_sm"], bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left", padx=(UI["s2"], 0))
 
         # ── Idioma + opções ───────────────────────────────────
         cfg_f = tk.Frame(card, bg=C["panel"])
-        cfg_f.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 14))
+        cfg_f.grid(row=4, column=0, sticky="ew",
+                   padx=UI["s4"], pady=(0, UI["s4"]))
 
         tk.Label(cfg_f, text="Idioma OCR", width=13, anchor="w",
-                 font=("Segoe UI", 9), bg=C["panel"],
+                 font=UI["font_body"], bg=C["panel"],
                  fg=C["fg_dim"]).pack(side="left")
         lang_combo = ttk.Combobox(cfg_f, textvariable=self.lang,
                                   width=26, state="readonly",
-                                  font=("Segoe UI", 9))
+                                  font=UI["font_body"])
         lang_combo["values"] = [
             "por — Português",
             "eng — Inglês",
@@ -1043,7 +1072,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             "deu — Alemão",
         ]
         lang_combo.current(0)
-        lang_combo.pack(side="left", ipady=4, padx=(0, 20))
+        lang_combo.pack(side="left", ipady=UI["entry_ipady"], padx=(0, UI["s5"]))
         lang_combo.bind("<<ComboboxSelected>>", self._on_lang_select)
 
         ttk.Checkbutton(
@@ -1055,29 +1084,35 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         ).pack(side="left")
 
         # ── Status + barra + botões (fixos na base) ───────────
-        bottom = tk.Frame(page, bg=C["bg"])
-        bottom.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        bottom = tk.Frame(page, bg=C["panel"],
+                          highlightthickness=1,
+                          highlightbackground=C["border"])
+        bottom.grid(row=1, column=0, sticky="ew",
+                    padx=UI["s5"], pady=(0, UI["s4"]))
         bottom.columnconfigure(0, weight=1)
 
         tk.Label(bottom, textvariable=self.status,
-                 font=("Segoe UI", 9), bg=C["bg"], fg=C["fg_dim"],
-                 anchor="w").grid(row=0, column=0, sticky="ew", pady=(4, 4))
+                 font=UI["font_body"], bg=C["panel"], fg=C["fg_dim"],
+                 anchor="w").grid(row=0, column=0, sticky="ew",
+                                  padx=UI["s4"], pady=(UI["s3"], UI["s1"]))
 
-        self.pb = CanvasProgressBar(bottom, height=6)
-        self.pb.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        self.pb = CanvasProgressBar(bottom, height=UI["progress_h"])
+        self.pb.grid(row=1, column=0, sticky="ew",
+                     padx=UI["s4"], pady=(0, UI["s3"]))
 
-        btn_f = tk.Frame(bottom, bg=C["bg"])
-        btn_f.grid(row=2, column=0, sticky="w")
+        btn_f = tk.Frame(bottom, bg=C["panel"])
+        btn_f.grid(row=2, column=0, sticky="w",
+                   padx=UI["s4"], pady=(0, UI["s4"]))
         self.btn_run = _accent_btn(
             btn_f, text="  ▶  Iniciar OCR  ",
             command=self._start,
-            font=("Segoe UI", 10, "bold"),
-            padx=18, pady=9,
+            font=UI["font_cta"],
+            padx=UI["cta_px"], pady=UI["cta_py"],
         )
-        self.btn_run.pack(side="left", padx=(0, 10))
+        self.btn_run.pack(side="left", padx=(0, UI["s3"]))
         _flat_btn(btn_f, text="Limpar lista",
                   command=self._clear,
-                  padx=14, pady=9).pack(side="left")
+                  padx=UI["cta_px"], pady=UI["cta_py"]).pack(side="left")
 
     # ── Página Comprimir ─────────────────────────────────────
 
@@ -1090,28 +1125,32 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         card = tk.Frame(page, bg=C["panel"],
                         highlightthickness=1,
                         highlightbackground=C["border"])
-        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.grid(row=0, column=0, sticky="nsew",
+                  padx=UI["s5"], pady=(UI["s5"], UI["s2"]))
         card.columnconfigure(0, weight=1)
         card.rowconfigure(1, weight=1)
 
         # ── Cabeçalho ─────────────────────────────────────────
         hdr = tk.Frame(card, bg=C["panel"])
-        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
+        hdr.grid(row=0, column=0, sticky="ew",
+                 padx=UI["s4"], pady=(UI["s4"], UI["s2"]))
         tk.Label(hdr, text="Arquivos PDF para comprimir",
-                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
+                 font=UI["font_title"], bg=C["panel"],
                  fg=C["fg"]).pack(side="left")
         self._cmp_count_lbl = tk.Label(
-            hdr, text="(0 arquivo)", font=("Segoe UI", 9),
+            hdr, text="(0 arquivo)", font=UI["font_body"],
             bg=C["panel"], fg=C["fg_dim"])
-        self._cmp_count_lbl.pack(side="left", padx=(6, 0))
+        self._cmp_count_lbl.pack(side="left", padx=(UI["s2"], 0))
         _flat_btn(hdr, "✕ Remover", self._compress_remove_selected,
-                  padx=8, pady=2).pack(side="right")
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(side="right")
         _flat_btn(hdr, "+ Adicionar", self._compress_add_files,
-                  padx=8, pady=2).pack(side="right", padx=(0, 4))
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(
+                      side="right", padx=(0, UI["s1"]))
 
         # ── Listbox ───────────────────────────────────────────
         list_f = tk.Frame(card, bg=C["panel"])
-        list_f.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 8))
+        list_f.grid(row=1, column=0, sticky="nsew",
+                    padx=UI["s4"], pady=(0, UI["s2"]))
         list_f.columnconfigure(0, weight=1)
         list_f.rowconfigure(0, weight=1)
 
@@ -1124,7 +1163,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             relief="flat", highlightthickness=2,
             highlightbackground=C["border"],
             highlightcolor=C["accent"],
-            font=("Segoe UI", 10), activestyle="none",
+            font=UI["font_list"], activestyle="none",
             selectmode="extended",
             yscrollcommand=sb_cmp.set,
         )
@@ -1136,69 +1175,78 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
         # ── Pasta de saída ────────────────────────────────────
         outdir_f = tk.Frame(card, bg=C["panel"])
-        outdir_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+        outdir_f.grid(row=2, column=0, sticky="ew",
+                      padx=UI["s4"], pady=(0, UI["s2"]))
         tk.Label(outdir_f, text="Pasta de saída", width=13, anchor="w",
-                 font=("Segoe UI", 9), bg=C["panel"],
+                 font=UI["font_body"], bg=C["panel"],
                  fg=C["fg_dim"]).pack(side="left")
         e_cout = tk.Entry(outdir_f, textvariable=self.compress_outdir,
-                          state="readonly", font=("Segoe UI", 9), width=42)
+                          state="readonly", font=UI["font_body"], width=42)
         _style_entry(e_cout)
-        e_cout.pack(side="left", ipady=4, padx=(0, 8))
+        e_cout.pack(side="left", ipady=UI["entry_ipady"], padx=(0, UI["s2"]))
         _flat_btn(outdir_f, "Pasta", self._browse_compress_outdir,
-                  padx=10, pady=3).pack(side="left")
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(side="left")
         tk.Label(outdir_f, text="(vazio = mesma pasta do PDF)",
-                 font=("Segoe UI", 8), bg=C["panel"],
-                 fg=C["fg_dim"]).pack(side="left", padx=(8, 0))
+                 font=UI["font_body_sm"], bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left", padx=(UI["s2"], 0))
 
         # ── Qualidade + Formato ───────────────────────────────
         qf_f = tk.Frame(card, bg=C["panel"])
-        qf_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
+        qf_f.grid(row=3, column=0, sticky="ew",
+                  padx=UI["s4"], pady=(0, UI["s2"]))
 
         tk.Label(qf_f, text="Qualidade", width=13, anchor="w",
-                 font=("Segoe UI", 9), bg=C["panel"],
+                 font=UI["font_body"], bg=C["panel"],
                  fg=C["fg_dim"]).pack(side="left")
         quality_combo = ttk.Combobox(
             qf_f, textvariable=self.compress_quality,
             values=[p[0] for p in self._QUALITY_PRESETS],
-            state="readonly", width=38, font=("Segoe UI", 9))
-        quality_combo.pack(side="left", ipady=4)
+            state="readonly", width=38, font=UI["font_body"])
+        quality_combo.pack(side="left", ipady=UI["entry_ipady"])
 
         fmt_f = tk.Frame(card, bg=C["panel"])
-        fmt_f.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 14))
+        fmt_f.grid(row=4, column=0, sticky="ew",
+                   padx=UI["s4"], pady=(0, UI["s4"]))
 
         tk.Label(fmt_f, text="Formato", width=13, anchor="w",
-                 font=("Segoe UI", 9), bg=C["panel"],
+                 font=UI["font_body"], bg=C["panel"],
                  fg=C["fg_dim"]).pack(side="left")
         fmt_combo = ttk.Combobox(
             fmt_f, textvariable=self.compress_format,
             values=[f[0] for f in self._IMG_FORMATS],
-            state="readonly", width=38, font=("Segoe UI", 9))
-        fmt_combo.pack(side="left", ipady=4)
+            state="readonly", width=38, font=UI["font_body"])
+        fmt_combo.pack(side="left", ipady=UI["entry_ipady"])
 
         # ── Status + barra + botões ───────────────────────────
-        bottom = tk.Frame(page, bg=C["bg"])
-        bottom.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        bottom = tk.Frame(page, bg=C["panel"],
+                          highlightthickness=1,
+                          highlightbackground=C["border"])
+        bottom.grid(row=1, column=0, sticky="ew",
+                    padx=UI["s5"], pady=(0, UI["s4"]))
         bottom.columnconfigure(0, weight=1)
 
         tk.Label(bottom, textvariable=self.compress_status,
-                 font=("Segoe UI", 9), bg=C["bg"], fg=C["fg_dim"],
-                 anchor="w").grid(row=0, column=0, sticky="ew", pady=(4, 4))
+                 font=UI["font_body"], bg=C["panel"], fg=C["fg_dim"],
+                 anchor="w").grid(row=0, column=0, sticky="ew",
+                                  padx=UI["s4"], pady=(UI["s3"], UI["s1"]))
 
-        self.compress_pb = CanvasProgressBar(bottom, height=6)
-        self.compress_pb.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        self.compress_pb = CanvasProgressBar(bottom, height=UI["progress_h"])
+        self.compress_pb.grid(row=1, column=0, sticky="ew",
+                              padx=UI["s4"], pady=(0, UI["s3"]))
 
-        btn_f = tk.Frame(bottom, bg=C["bg"])
-        btn_f.grid(row=2, column=0, sticky="w")
+        btn_f = tk.Frame(bottom, bg=C["panel"])
+        btn_f.grid(row=2, column=0, sticky="w",
+                   padx=UI["s4"], pady=(0, UI["s4"]))
         self.btn_compress = _accent_btn(
             btn_f, text="  ⊜  Comprimir PDFs  ",
             command=self._start_compress,
-            font=("Segoe UI", 10, "bold"),
-            padx=18, pady=9,
+            font=UI["font_cta"],
+            padx=UI["cta_px"], pady=UI["cta_py"],
         )
-        self.btn_compress.pack(side="left", padx=(0, 10))
+        self.btn_compress.pack(side="left", padx=(0, UI["s3"]))
         _flat_btn(btn_f, text="Limpar lista",
                   command=self._clear_compress,
-                  padx=14, pady=9).pack(side="left")
+                  padx=UI["cta_px"], pady=UI["cta_py"]).pack(side="left")
 
     # ── Comprimir eventos ─────────────────────────────────────
 
@@ -1398,28 +1446,32 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         card = tk.Frame(page, bg=C["panel"],
                         highlightthickness=1,
                         highlightbackground=C["border"])
-        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.grid(row=0, column=0, sticky="nsew",
+                  padx=UI["s5"], pady=(UI["s5"], UI["s2"]))
         card.columnconfigure(0, weight=1)
         card.rowconfigure(1, weight=1)
 
         # ── Cabeçalho ─────────────────────────────────────────
         hdr = tk.Frame(card, bg=C["panel"])
-        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
+        hdr.grid(row=0, column=0, sticky="ew",
+                 padx=UI["s4"], pady=(UI["s4"], UI["s2"]))
         tk.Label(hdr, text="Arquivos PDF para converter em Word",
-                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
+                 font=UI["font_title"], bg=C["panel"],
                  fg=C["fg"]).pack(side="left")
         self._word_count_lbl = tk.Label(
-            hdr, text="(0 arquivo)", font=("Segoe UI", 9),
+            hdr, text="(0 arquivo)", font=UI["font_body"],
             bg=C["panel"], fg=C["fg_dim"])
-        self._word_count_lbl.pack(side="left", padx=(6, 0))
+        self._word_count_lbl.pack(side="left", padx=(UI["s2"], 0))
         _flat_btn(hdr, "✕ Remover", self._word_remove_selected,
-                  padx=8, pady=2).pack(side="right")
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(side="right")
         _flat_btn(hdr, "+ Adicionar", self._word_add_files,
-                  padx=8, pady=2).pack(side="right", padx=(0, 4))
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(
+                      side="right", padx=(0, UI["s1"]))
 
         # ── Listbox ───────────────────────────────────────────
         list_f = tk.Frame(card, bg=C["panel"])
-        list_f.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 8))
+        list_f.grid(row=1, column=0, sticky="nsew",
+                    padx=UI["s4"], pady=(0, UI["s2"]))
         list_f.columnconfigure(0, weight=1)
         list_f.rowconfigure(0, weight=1)
 
@@ -1432,7 +1484,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             relief="flat", highlightthickness=2,
             highlightbackground=C["border"],
             highlightcolor=C["accent"],
-            font=("Segoe UI", 10), activestyle="none",
+            font=UI["font_list"], activestyle="none",
             selectmode="extended",
             yscrollcommand=sb_w.set,
         )
@@ -1446,11 +1498,12 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         drop_f = tk.Frame(card, bg=C["input"],
                           highlightthickness=1,
                           highlightbackground=C["border"])
-        drop_f.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 8))
+        drop_f.grid(row=2, column=0, sticky="ew",
+                    padx=UI["s4"], pady=(0, UI["s2"]))
         drop_lbl = tk.Label(drop_f,
                             text="⬢  Arraste PDFs aqui  ou  clique em + Adicionar",
-                            font=("Segoe UI", 9), bg=C["input"],
-                            fg=C["fg_dim"], pady=10)
+                            font=UI["font_body"], bg=C["input"],
+                            fg=C["fg_dim"], pady=UI["s3"])
         drop_lbl.pack()
         if _HAS_DND:
             self._word_listbox.drop_target_register(TkinterDnD.DND_FILES)
@@ -1462,44 +1515,51 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
         # ── Pasta de saída ────────────────────────────────────
         outdir_f = tk.Frame(card, bg=C["panel"])
-        outdir_f.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 14))
+        outdir_f.grid(row=3, column=0, sticky="ew",
+                      padx=UI["s4"], pady=(0, UI["s4"]))
         tk.Label(outdir_f, text="Pasta de saída", width=13, anchor="w",
-                 font=("Segoe UI", 9), bg=C["panel"],
+                 font=UI["font_body"], bg=C["panel"],
                  fg=C["fg_dim"]).pack(side="left")
         e_wout = tk.Entry(outdir_f, textvariable=self._word_outdir,
-                          state="readonly", font=("Segoe UI", 9), width=42)
+                          state="readonly", font=UI["font_body"], width=42)
         _style_entry(e_wout)
-        e_wout.pack(side="left", ipady=4, padx=(0, 8))
+        e_wout.pack(side="left", ipady=UI["entry_ipady"], padx=(0, UI["s2"]))
         _flat_btn(outdir_f, "Pasta", self._browse_word_outdir,
-                  padx=10, pady=3).pack(side="left")
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(side="left")
         tk.Label(outdir_f, text="(vazio = mesma pasta do PDF)",
-                 font=("Segoe UI", 8), bg=C["panel"],
-                 fg=C["fg_dim"]).pack(side="left", padx=(8, 0))
+                 font=UI["font_body_sm"], bg=C["panel"],
+                 fg=C["fg_dim"]).pack(side="left", padx=(UI["s2"], 0))
 
         # ── Status + barra + botões ───────────────────────────
-        bottom = tk.Frame(page, bg=C["bg"])
-        bottom.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        bottom = tk.Frame(page, bg=C["panel"],
+                          highlightthickness=1,
+                          highlightbackground=C["border"])
+        bottom.grid(row=1, column=0, sticky="ew",
+                    padx=UI["s5"], pady=(0, UI["s4"]))
         bottom.columnconfigure(0, weight=1)
 
         tk.Label(bottom, textvariable=self._word_status,
-                 font=("Segoe UI", 9), bg=C["bg"], fg=C["fg_dim"],
-                 anchor="w").grid(row=0, column=0, sticky="ew", pady=(4, 4))
+                 font=UI["font_body"], bg=C["panel"], fg=C["fg_dim"],
+                 anchor="w").grid(row=0, column=0, sticky="ew",
+                                  padx=UI["s4"], pady=(UI["s3"], UI["s1"]))
 
-        self._word_pb = CanvasProgressBar(bottom, height=6)
-        self._word_pb.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        self._word_pb = CanvasProgressBar(bottom, height=UI["progress_h"])
+        self._word_pb.grid(row=1, column=0, sticky="ew",
+                           padx=UI["s4"], pady=(0, UI["s3"]))
 
-        btn_f = tk.Frame(bottom, bg=C["bg"])
-        btn_f.grid(row=2, column=0, sticky="w")
+        btn_f = tk.Frame(bottom, bg=C["panel"])
+        btn_f.grid(row=2, column=0, sticky="w",
+                   padx=UI["s4"], pady=(0, UI["s4"]))
         self.btn_word = _accent_btn(
             btn_f, text="  ⬢  Converter para Word  ",
             command=self._start_word,
-            font=("Segoe UI", 10, "bold"),
-            padx=18, pady=9,
+            font=UI["font_cta"],
+            padx=UI["cta_px"], pady=UI["cta_py"],
         )
-        self.btn_word.pack(side="left", padx=(0, 10))
+        self.btn_word.pack(side="left", padx=(0, UI["s3"]))
         _flat_btn(btn_f, text="Limpar lista",
                   command=self._clear_word,
-                  padx=14, pady=9).pack(side="left")
+                  padx=UI["cta_px"], pady=UI["cta_py"]).pack(side="left")
 
     # ── Word eventos ─────────────────────────────────────────
 
@@ -1632,32 +1692,33 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         card = tk.Frame(page, bg=C["panel"],
                         highlightthickness=1,
                         highlightbackground=C["border"])
-        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.grid(row=0, column=0, sticky="nsew",
+                  padx=UI["s5"], pady=(UI["s5"], UI["s2"]))
         card.columnconfigure(0, weight=1)
 
-        inner = tk.Frame(card, bg=C["panel"], padx=20, pady=16)
+        inner = tk.Frame(card, bg=C["panel"], padx=UI["s5"], pady=UI["s4"])
         inner.pack(fill="both", expand=True)
         inner.columnconfigure(0, weight=1)
 
         # ── Seleção de arquivo ──────────────────────────────────
         file_f = tk.Frame(inner, bg=C["panel"])
-        file_f.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        file_f.grid(row=0, column=0, sticky="ew", pady=(0, UI["s3"]))
         _flat_btn(file_f, "+ Selecionar PDF", self._split_select_file,
-                  padx=10, pady=3).pack(side="left")
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(side="left")
         self._split_file_lbl = tk.Label(
             file_f, text="Nenhum arquivo selecionado",
-            font=("Segoe UI", 9), bg=C["panel"], fg=C["fg_dim"])
-        self._split_file_lbl.pack(side="left", padx=(10, 0))
+            font=UI["font_body"], bg=C["panel"], fg=C["fg_dim"])
+        self._split_file_lbl.pack(side="left", padx=(UI["s3"], 0))
 
         tk.Frame(inner, bg=C["border"], height=1).grid(row=1, column=0, sticky="ew", pady=(0, 12))
 
         # ── Modo de divisão (compacto, acima da prévia) ─────────────
         mode_f = tk.Frame(inner, bg=C["panel"])
-        mode_f.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        mode_f.grid(row=2, column=0, sticky="ew", pady=(0, UI["s2"]))
 
         tk.Label(mode_f, text="Modo:",
-                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
-                 fg=C["fg"]).pack(side="left", padx=(0, 8))
+                 font=UI["font_title"], bg=C["panel"],
+                 fg=C["fg"]).pack(side="left", padx=(0, UI["s2"]))
 
         self._split_mode = tk.StringVar(value="single")
         for val, label in [("single", "Intervalo único"),
@@ -1760,19 +1821,20 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         # ── Progresso e botão ────────────────────────────────────
         self._split_status = tk.StringVar(value="Selecione um PDF para dividir.")
         tk.Label(inner, textvariable=self._split_status,
-                 font=("Segoe UI", 9), bg=C["panel"],
-                 fg=C["fg_dim"], anchor="w").grid(row=7, column=0, sticky="ew", pady=(0, 4))
+                 font=UI["font_body"], bg=C["panel"],
+                 fg=C["fg_dim"], anchor="w").grid(
+                     row=7, column=0, sticky="ew", pady=(0, UI["s1"]))
 
-        self._split_pb = CanvasProgressBar(inner, height=6)
-        self._split_pb.grid(row=8, column=0, sticky="ew", pady=(0, 10))
+        self._split_pb = CanvasProgressBar(inner, height=UI["progress_h"])
+        self._split_pb.grid(row=8, column=0, sticky="ew", pady=(0, UI["s3"]))
 
         btn_f = tk.Frame(inner, bg=C["panel"])
         btn_f.grid(row=9, column=0, sticky="w")
         self.btn_split = _accent_btn(
             btn_f, text="  \u229f  Dividir PDF  ",
             command=self._start_split,
-            font=("Segoe UI", 10, "bold"),
-            padx=18, pady=9,
+            font=UI["font_cta"],
+            padx=UI["cta_px"], pady=UI["cta_py"],
         )
         self.btn_split.pack(side="left")
 
@@ -2004,33 +2066,35 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         card = tk.Frame(page, bg=C["panel"],
                         highlightthickness=1,
                         highlightbackground=C["border"])
-        card.grid(row=0, column=0, sticky="nsew", padx=24, pady=(20, 8))
+        card.grid(row=0, column=0, sticky="nsew",
+                  padx=UI["s5"], pady=(UI["s5"], UI["s2"]))
         card.columnconfigure(0, weight=1)
         card.rowconfigure(1, weight=1)
 
-        inner = tk.Frame(card, bg=C["panel"], padx=20, pady=16)
+        inner = tk.Frame(card, bg=C["panel"], padx=UI["s5"], pady=UI["s4"])
         inner.pack(fill="both", expand=True)
         inner.columnconfigure(0, weight=1)
         inner.rowconfigure(3, weight=1)
 
         # ── Cabeçalho / botões ───────────────────────────────────
         hdr = tk.Frame(inner, bg=C["panel"])
-        hdr.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        hdr.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, UI["s2"]))
         tk.Label(hdr, text="PDFs para juntar",
-                 font=("Segoe UI", 9, "bold"), bg=C["panel"],
+                 font=UI["font_title"], bg=C["panel"],
                  fg=C["fg"]).pack(side="left")
         self._merge_count_lbl = tk.Label(
-            hdr, text="(0 arquivos)", font=("Segoe UI", 9),
+            hdr, text="(0 arquivos)", font=UI["font_body"],
             bg=C["panel"], fg=C["fg_dim"])
-        self._merge_count_lbl.pack(side="left", padx=(6, 0))
+        self._merge_count_lbl.pack(side="left", padx=(UI["s2"], 0))
         _flat_btn(hdr, "✕ Remover", self._merge_remove_selected,
-                  padx=8, pady=2).pack(side="right")
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(side="right")
         _flat_btn(hdr, "+ Adicionar PDFs", self._merge_add_files,
-                  padx=8, pady=2).pack(side="right", padx=(0, 4))
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(
+                      side="right", padx=(0, UI["s1"]))
 
         # ── Listbox + botões ↑↓ (topo, altura fixa) ─────────────
         list_outer = tk.Frame(inner, bg=C["panel"])
-        list_outer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        list_outer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, UI["s2"]))
         list_outer.columnconfigure(0, weight=1)
 
         list_f = tk.Frame(list_outer, bg=C["panel"])
@@ -2046,7 +2110,7 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             relief="flat", highlightthickness=2,
             highlightbackground=C["border"],
             highlightcolor=C["accent"],
-            font=("Segoe UI", 10), activestyle="none",
+            font=UI["font_list"], activestyle="none",
             yscrollcommand=sb.set,
             height=5,
         )
@@ -2068,21 +2132,21 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
 
         # ── Botões ↑ ↓ (inline à direita da listbox) ────────────
         ord_f = tk.Frame(list_outer, bg=C["panel"])
-        ord_f.grid(row=0, column=1, sticky="ns", padx=(8, 0))
+        ord_f.grid(row=0, column=1, sticky="ns", padx=(UI["s2"], 0))
         _flat_btn(ord_f, "↑", self._merge_move_up,
-                  padx=10, pady=6).pack(pady=(0, 4))
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack(pady=(0, UI["s1"]))
         _flat_btn(ord_f, "↓", self._merge_move_down,
-                  padx=10, pady=6).pack()
+                  padx=UI["btn_px"], pady=UI["btn_py"]).pack()
 
         # ── Área de drop visual ──────────────────────────────────
         drop_f = tk.Frame(inner, bg=C["input"],
                           highlightthickness=1,
                           highlightbackground=C["border"])
-        drop_f.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        drop_f.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, UI["s2"]))
         drop_lbl = tk.Label(drop_f,
                             text="⊞  Arraste PDFs aqui  ou  clique em + Adicionar PDFs",
-                            font=("Segoe UI", 9), bg=C["input"],
-                            fg=C["fg_dim"], pady=10)
+                            font=UI["font_body"], bg=C["input"],
+                            fg=C["fg_dim"], pady=UI["s3"])
         drop_lbl.pack()
         if _HAS_DND:
             drop_f.drop_target_register(TkinterDnD.DND_FILES)
@@ -2094,29 +2158,30 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
         preview_f = tk.Frame(inner, bg=C["input"],
                              highlightthickness=1,
                              highlightbackground=C["border"])
-        preview_f.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(0, 8))
+        preview_f.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(0, UI["s2"]))
         preview_f.rowconfigure(0, weight=1)
         preview_f.columnconfigure(0, weight=1)
 
         self._merge_preview_lbl = tk.Label(
             preview_f, text="Selecione um PDF\npara pré-visualizar",
-            font=("Segoe UI", 9), bg=C["input"], fg=C["fg_dim"],
+            font=UI["font_body"], bg=C["input"], fg=C["fg_dim"],
             anchor="center")
-        self._merge_preview_lbl.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        self._merge_preview_lbl.grid(row=0, column=0, sticky="nsew",
+                                     padx=UI["s2"], pady=UI["s2"])
         self._merge_preview_photo = None  # keep reference
 
         self._merge_preview_name = tk.Label(
             preview_f, text="",
-            font=("Segoe UI", 8), bg=C["input"], fg=C["fg_dim"],
+            font=UI["font_body_sm"], bg=C["input"], fg=C["fg_dim"],
             wraplength=300)
-        self._merge_preview_name.grid(row=1, column=0, pady=(0, 8))
+        self._merge_preview_name.grid(row=1, column=0, pady=(0, UI["s2"]))
 
         # ── Destino ──────────────────────────────────────────────
         tk.Frame(inner, bg=C["border"], height=1).grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+            row=4, column=0, columnspan=2, sticky="ew", pady=(0, UI["s3"]))
 
         dest_f = tk.Frame(inner, bg=C["panel"])
-        dest_f.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        dest_f.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(0, UI["s3"]))
         self._merge_same_dir = tk.BooleanVar(value=True)
         tk.Checkbutton(
             dest_f, text="Salvar na mesma pasta do primeiro PDF",
@@ -2124,31 +2189,31 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
             bg=C["panel"], fg=C["fg"],
             selectcolor=C["input"],
             activebackground=C["panel"], activeforeground=C["accent"],
-            font=("Segoe UI", 9),
+            font=UI["font_body"],
             highlightthickness=0,
         ).pack(side="left")
 
         # ── Progresso e botão ────────────────────────────────────
         self._merge_status = tk.StringVar(value="Adicione PDFs para juntar.")
         tk.Label(inner, textvariable=self._merge_status,
-                 font=("Segoe UI", 9), bg=C["panel"],
+                 font=UI["font_body"], bg=C["panel"],
                  fg=C["fg_dim"], anchor="w").grid(
-            row=6, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+            row=6, column=0, columnspan=2, sticky="ew", pady=(0, UI["s1"]))
 
-        self._merge_pb = CanvasProgressBar(inner, height=6)
-        self._merge_pb.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        self._merge_pb = CanvasProgressBar(inner, height=UI["progress_h"])
+        self._merge_pb.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(0, UI["s3"]))
 
         btn_f = tk.Frame(inner, bg=C["panel"])
         btn_f.grid(row=8, column=0, columnspan=2, sticky="w")
         self.btn_merge = _accent_btn(
             btn_f, text="  ⊞  Juntar PDFs  ",
             command=self._start_merge,
-            font=("Segoe UI", 10, "bold"),
-            padx=18, pady=9,
+            font=UI["font_cta"],
+            padx=UI["cta_px"], pady=UI["cta_py"],
         )
-        self.btn_merge.pack(side="left", padx=(0, 10))
+        self.btn_merge.pack(side="left", padx=(0, UI["s3"]))
         _flat_btn(btn_f, "Limpar lista", self._merge_clear,
-                  padx=14, pady=9).pack(side="left")
+                  padx=UI["cta_px"], pady=UI["cta_py"]).pack(side="left")
 
     def _merge_add_files(self):
         paths = filedialog.askopenfilenames(
