@@ -193,22 +193,19 @@ jobs:
           body: |
             ## ${{ steps.resolve_tag.outputs.tag }} — PDF Tools
 
-            ### 🚀 Migração para PyQt6
-            Interface completamente reescrita com PyQt6 — visual moderno Ocean/Teal, sidebar fixa e navegação fluida entre abas.
+            ### ✦ spaCy integrado no EXE
+            Modelo `pt_core_news_lg` embutido diretamente no executável — detecção de nomes por IA funciona sem nenhuma instalação adicional pelo usuário.
 
-            ### ✦ Drag & drop nativo
-            Sem dependência de `tkinterdnd2` — arraste PDFs diretamente para qualquer aba.
+            ### ✦ Python 3.12 no build
+            Compilação migrada de Python 3.11 para 3.12. Compatibilidade total com spaCy e wheels nativos, sem compilação C++ em runtime.
 
-            ### ✦ Workers assíncronos
-            OCR, Comprimir, Dividir, Juntar e PDF→Word rodam em QThread com signals — UI nunca trava.
+            ### ✦ Sem aviso de programa não seguro
+            Eliminado o aviso do Windows Defender que aparecia ao tentar instalar spaCy em Python 3.14 via subprocess.
 
-            ### ✦ SpinnerDialog animado
-            Modal com dois círculos orbitais animados em todas as operações longas.
-
-            ### ✦ Estrutura multi-arquivo
-            Código reorganizado em `pdf_ocr_qt/` com `pages/`, `widgets/` e `workers.py`.
+            ### ✦ Correção de carregamento no EXE congelado
+            Caminho do modelo spaCy corrigido para `_MEIPASS` quando rodando como executável PyInstaller.
 
             ---
-            Veja o [CHANGELOG completo](https://github.com/nicolastd5/pdf-ocr/blob/master/CHANGELOG.md) para o histórico de versões.
+            Veja o [histórico de versões](https://github.com/nicolastd5/pdf-ocr/releases) para versões anteriores.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

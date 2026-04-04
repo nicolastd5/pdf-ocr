@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from pdf_ocr_qt.styles import flat_btn, accent_btn, C
 
-APP_VERSION      = "1.0.8"
+APP_VERSION      = "1.0.9"
 GITHUB_RELEASES_PAGE = "https://github.com/nicolastd5/pdf-ocr/releases"
 
 
@@ -46,11 +46,11 @@ class AboutPage(QWidget):
         layout.addWidget(cl_title)
 
         changelog = QLabel(
-            "• IA para detecção de nomes com spaCy (NER)\n"
-            "• Detecta pessoas, organizações e locais — destaque colorido por tipo\n"
-            "• Exportação de entidades em CSV\n"
-            "• OpenAI opcional (GPT-4o-mini) para NER avançado\n"
-            "• Design tokens centralizados, botões com estado melhorado"
+            "• spaCy integrado diretamente no EXE — sem instalação necessária\n"
+            "• Python 3.12 no build: compatibilidade total com spaCy e wheels nativos\n"
+            "• Modelo pt_core_news_lg embutido no executável\n"
+            "• Eliminado aviso de 'programa não seguro' do Windows durante instalação de IA\n"
+            "• Carregamento do modelo spaCy corrigido ao rodar como EXE congelado"
         )
         changelog.setObjectName("dim_lbl")
         changelog.setWordWrap(True)

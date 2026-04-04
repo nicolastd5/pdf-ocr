@@ -35,7 +35,7 @@ Converter = None        # pdf2docx.Converter
 DEPS_OK = None          # None = not yet loaded; True/False = result
 MISSING_DEP = ""
 
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -2574,20 +2574,22 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                  bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
 
         _changelog = [
-            ("⬢", "IA para detecção de nomes",
-             "Detecção de entidades nomeadas (NER) com spaCy.\n"
-             "Detecta pessoas, organizações e locais com destaque\n"
-             "colorido por tipo. Exportação de resultados em CSV."),
-            ("⬡", "OpenAI opcional",
-             "Integração com GPT-4o-mini para NER avançado.\n"
-             "Configure sua chave de API na página de OCR.\n"
-             "Funciona offline por padrão com spaCy."),
-            ("⬡", "Design tokens (UI)",
-             "Espaçamentos e fontes centralizados no dict UI{}.\n"
-             "Botões com estado desabilitado melhorado."),
-            ("⬡", "Migração PyQt6",
-             "Nova interface com PyQt6 (pdf_ocr_qt).\n"
-             "Workers assíncronos, spinner animado e drag & drop nativo."),
+            ("⬢", "spaCy no EXE",
+             "Modelo pt_core_news_lg embutido diretamente\n"
+             "no executável. Sem instalação necessária pelo\n"
+             "usuário final."),
+            ("⬡", "Python 3.12 no build",
+             "Compilação migrada para Python 3.12.\n"
+             "Compatibilidade total com spaCy e wheels\n"
+             "nativos sem compilação C++."),
+            ("⬡", "Sem aviso do Windows",
+             "Eliminado o aviso de 'programa não seguro'\n"
+             "que aparecia ao tentar instalar spaCy\n"
+             "em Python 3.14."),
+            ("⬡", "Correção EXE congelado",
+             "Carregamento do modelo spaCy corrigido\n"
+             "ao rodar como executável PyInstaller\n"
+             "(caminho _MEIPASS)."),
         ]
 
         cl_f = tk.Frame(cl_inner, bg=C["panel"])
