@@ -51,20 +51,37 @@ class NERPipeline:
 
     @staticmethod
     def _find_model_path() -> str | None:
-        """Localiza o diretório do modelo pt_core_news_lg dentro do _MEIPASS."""
+        """Localiza o diretório do modelo pt_core_news_lg dentro do _MEIPASS.
+
+        collect_data_files("pt_core_news_lg") produz:
+          _MEIPASS/pt_core_news_lg/meta.json          <- meta do pacote Python
+          _MEIPASS/pt_core_news_lg/pt_core_news_lg-X.Y.Z/meta.json  <- modelo real
+          _MEIPASS/pt_core_news_lg/pt_core_news_lg-X.Y.Z/config.cfg
+          ...
+
+        spacy.load() precisa do diretório que contém config.cfg (modelo real),
+        não do diretório raiz do pacote.
+        """
         import os
         base = sys._MEIPASS
-        # collect_data_files pode gerar pt_core_news_lg/ ou pt_core_news_lg/pt_core_news_lg/
-        for candidate in [
-            os.path.join(base, "pt_core_news_lg"),
-            os.path.join(base, "pt_core_news_lg", "pt_core_news_lg"),
-        ]:
-            if os.path.isfile(os.path.join(candidate, "meta.json")):
-                return candidate
-        # Busca recursiva como fallback
+        pkg_dir = os.path.join(base, "pt_core_news_lg")
+        if os.path.isdir(pkg_dir):
+            # Procura subdiretório que contém config.cfg (é o modelo real)
+            for entry in os.scandir(pkg_dir):
+                if entry.is_dir() and entry.name.startswith("pt_core_news_lg"):
+                    if os.path.isfile(os.path.join(entry.path, "config.cfg")):
+                        return entry.path
+            # Fallback: qualquer subdiretório com meta.json e config.cfg
+            for entry in os.scandir(pkg_dir):
+                if entry.is_dir():
+                    if (os.path.isfile(os.path.join(entry.path, "config.cfg")) and
+                            os.path.isfile(os.path.join(entry.path, "meta.json"))):
+                        return entry.path
+        # Último recurso: busca recursiva pelo config.cfg
         for root, dirs, files in os.walk(base):
-            if "meta.json" in files and os.path.basename(root).startswith("pt_core_news_lg"):
-                return root
+            if "config.cfg" in files and "meta.json" in files:
+                if os.path.basename(root).startswith("pt_core_news_lg"):
+                    return root
         return None
 
     @staticmethod

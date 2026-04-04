@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from pdf_ocr_qt.styles import flat_btn, accent_btn, C
 
-APP_VERSION      = "2.0.1"
+APP_VERSION      = "2.0.2"
 GITHUB_RELEASES_PAGE = "https://github.com/nicolastd5/pdf-ocr/releases"
 
 
@@ -46,10 +46,10 @@ class AboutPage(QWidget):
         layout.addWidget(cl_title)
 
         changelog = QLabel(
-            "• Corrigido: verificação de atualização e auto-update voltaram a funcionar\n"
-            "• Corrigido: modelo spaCy agora é encontrado corretamente dentro do EXE\n"
-            "• Busca robusta do modelo pt_core_news_lg em múltiplos paths do _MEIPASS\n"
-            "• Comunicação thread→UI reescrita com QTimer.singleShot (mais confiável)"
+            "• Corrigido: modelo spaCy (IA) agora é carregado corretamente no EXE\n"
+            "• Identificado path real do modelo: pt_core_news_lg/pt_core_news_lg-X.Y.Z/\n"
+            "• Corrigido: verificação de atualização e auto-update funcionando\n"
+            "• Comunicação thread→UI reescrita com QTimer.singleShot"
         )
         changelog.setObjectName("dim_lbl")
         changelog.setWordWrap(True)

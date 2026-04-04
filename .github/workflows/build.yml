@@ -149,21 +149,6 @@ jobs:
           Write-Host "=== deps\poppler\bin ==="
           Get-ChildItem deps\poppler\bin | Select-Object Name
 
-      # ── Diagnóstico spaCy (mostra onde os arquivos do modelo vão no _MEIPASS) ──
-      - name: Diagnose spaCy bundle paths
-        shell: pwsh
-        run: |
-          python -c @"
-          import spacy, os
-          from PyInstaller.utils.hooks import collect_data_files
-          model_path = spacy.util.get_package_path('pt_core_news_lg')
-          print('=== model_path:', model_path)
-          datas = collect_data_files('pt_core_news_lg')
-          print(f'=== collect_data_files produced {len(datas)} entries ===')
-          for src, dst in sorted(datas, key=lambda x: x[1]):
-              print(f'  DST={dst!r:40s}  FILE={os.path.basename(src)}')
-          "@
-
       # ── Build EXE ────────────────────────────────────────────────────────────
       - name: Build EXE with PyInstaller
         run: pyinstaller pdf_ocr.spec
@@ -208,14 +193,11 @@ jobs:
           body: |
             ## ${{ steps.resolve_tag.outputs.tag }} — PDF Tools
 
-            ### ✦ Verificação de atualização corrigida
-            Auto-update e botão "Verificar atualização" voltaram a funcionar. A comunicação entre thread de rede e UI foi reescrita com `QTimer.singleShot`, eliminando o crash silencioso causado por `QMetaObject.invokeMethod` sem slot registrado.
+            ### ✦ Corrigido: modelo spaCy (IA) não carregava no EXE
+            Identificado o path real onde `collect_data_files` empacota o modelo: `_MEIPASS/pt_core_news_lg/pt_core_news_lg-X.Y.Z/`. As tentativas anteriores buscavam em `pt_core_news_lg/pt_core_news_lg/` (incorreto). O código agora busca pelo subdiretório que contém `config.cfg`, que é o identificador único do modelo real (o `meta.json` na raiz é do pacote Python, não do modelo).
 
-            ### ✦ Modelo spaCy encontrado corretamente no EXE
-            Corrigido o erro "Modelo pt_core_news_lg não encontrado" ao usar a função de IA. O código agora busca o modelo em múltiplos paths dentro do `_MEIPASS` (incluindo subdiretórios gerados pelo `collect_data_files`), com fallback recursivo.
-
-            ### ✦ Bundling do spaCy aprimorado
-            O `.spec` agora usa `collect_data_files` + `collect_submodules` para garantir que todos os arquivos do modelo e submódulos do spaCy/thinc sejam incluídos no EXE.
+            ### ✦ Verificação de atualização corrigida (v2.0.1)
+            Auto-update e botão "Verificar atualização" voltaram a funcionar com `QTimer.singleShot`.
 
             ---
             Veja o [histórico de versões](https://github.com/nicolastd5/pdf-ocr/releases) para versões anteriores.
