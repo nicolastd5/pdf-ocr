@@ -18,29 +18,51 @@ class OcrWorker(QThread):
     progress = pyqtSignal(int, int, str)   # current_page, total_pages, status
     finished = pyqtSignal(list, list)       # ok_files, errors
     error    = pyqtSignal(str)
+    entities = pyqtSignal(list)   # list[Entity], emitido após finished
 
     def __init__(self, files, outdir, lang, highlight_names,
-                 poppler_path, parent=None):
+                 poppler_path, use_ner=False, use_openai=False,
+                 openai_key="", ner_engine="spacy", parent=None):
         super().__init__(parent)
         self.files           = files
         self.outdir          = outdir
         self.lang            = lang
         self.highlight_names = highlight_names
         self.poppler_path    = poppler_path
+        self.use_ner         = use_ner
+        self.use_openai      = use_openai
+        self.openai_key      = openai_key
+        self.ner_engine      = ner_engine
 
     def run(self):
+        from pdf_ocr_qt.ner import NERPipeline
+        pipeline = None
+        if self.use_ner:
+            pipeline = NERPipeline(
+                use_openai=self.use_openai,
+                openai_key=self.openai_key,
+                engine=self.ner_engine,
+            )
+
         total = len(self.files)
         ok_files, errors = [], []
+        all_entities = []
+
         for fi, input_pdf in enumerate(self.files, 1):
             base     = os.path.splitext(os.path.basename(input_pdf))[0]
             dest_dir = self.outdir if self.outdir else os.path.dirname(input_pdf)
             output_pdf = os.path.join(dest_dir, base + "_pesquisavel.pdf")
             try:
-                self._process_single(input_pdf, output_pdf, fi, total)
+                page_entities = self._process_single(
+                    input_pdf, output_pdf, fi, total, pipeline)
                 ok_files.append(output_pdf)
+                all_entities.extend(page_entities)
             except Exception as e:
                 errors.append(f"{os.path.basename(input_pdf)}: {e}")
+
         self.finished.emit(ok_files, errors)
+        if self.use_ner:
+            self.entities.emit(all_entities)
 
     def _preprocess_for_ocr(self, img):
         img = img.convert("L")
@@ -92,9 +114,10 @@ class OcrWorker(QThread):
             i += 1
         return boxes
 
-    def _process_single(self, input_pdf, output_pdf, fi, total_files):
+    def _process_single(self, input_pdf, output_pdf, fi, total_files, pipeline=None):
         tess_config = "--oem 3 --psm 3"
         basename = os.path.basename(input_pdf)
+        page_entities = []
 
         with open(input_pdf, "rb") as fh:
             total_pages = len(PyPDF2.PdfReader(fh).pages)
@@ -125,7 +148,34 @@ class OcrWorker(QThread):
                             width=img_w, height=img_h)
                 del pil_img, page_imgs
 
-                if self.highlight_names:
+                # ── Destaque de entidades ─────────────────────────
+                if pipeline is not None:
+                    from pdf_ocr_qt.ner import ENTITY_TYPES
+                    ner_result = pipeline.extract(ocr_data, pi)
+                    _COLORS = {
+                        "PER":  (1.0, 0.85, 0.0, 0.35),
+                        "ORG":  (0.2, 0.6,  1.0, 0.30),
+                        "LOC":  (0.2, 0.85, 0.4, 0.30),
+                        "MISC": (0.6, 0.6,  0.6, 0.25),
+                    }
+                    boxes_by_type: dict[str, list] = {k: [] for k in ENTITY_TYPES}
+                    for ent in ner_result.entities:
+                        bx, by, bw, bh = ent.bbox
+                        if bw > 0 and bh > 0:
+                            boxes_by_type[ent.type].append((bx, by, bw, bh))
+                    c.saveState()
+                    for etype, boxes in boxes_by_type.items():
+                        r, g, b, a = _COLORS.get(etype, (1.0, 0.85, 0.0, 0.35))
+                        c.setFillColorRGB(r, g, b, alpha=a)
+                        for nx, ny, nw, nh in boxes:
+                            pad = 2
+                            c.rect(nx - pad, img_h - ny - nh - pad,
+                                   nw + pad * 2, nh + pad * 2,
+                                   fill=1, stroke=0)
+                    c.restoreState()
+                    page_entities.extend(ner_result.entities)
+                elif self.highlight_names:
+                    # Fallback: regex original
                     name_boxes = self._detect_names(ocr_data)
                     if name_boxes:
                         c.saveState()
@@ -180,6 +230,7 @@ class OcrWorker(QThread):
                 merger.write(f)
         finally:
             merger.close()
+        return page_entities
 
 
 class CompressWorker(QThread):
