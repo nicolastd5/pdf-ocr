@@ -6,7 +6,7 @@
 #
 # O PyInstaller os embute no EXE via 'binaries' e 'datas' abaixo.
 
-import os, glob
+import os, glob, sys
 
 block_cipher = None
 
@@ -24,6 +24,16 @@ if os.path.isdir(tess_root):
     if os.path.isdir(tessdata_dir):
         tess_datas.append((tessdata_dir, "tessdata"))
 
+# ── spaCy model data ──────────────────────────────────────────────────────────
+spacy_datas = []
+try:
+    import spacy
+    model_path = spacy.util.get_package_path("pt_core_news_lg")
+    if os.path.isdir(str(model_path)):
+        spacy_datas.append((str(model_path), "pt_core_news_lg"))
+except Exception:
+    pass  # spaCy não instalado no ambiente de build — ignorar
+
 # ── Poppler binários ───────────────────────────────────────────────────────────
 poppler_bin = os.path.join(os.getcwd(), "deps", "poppler", "bin")
 poppler_binaries = []
@@ -40,7 +50,7 @@ a = Analysis(
     ['pdf_ocr_qt/main.py'],
     pathex=[],
     binaries=tess_binaries + poppler_binaries,
-    datas=tess_datas,
+    datas=tess_datas + spacy_datas,
     hiddenimports=[
         'pytesseract',
         'PIL',
@@ -57,6 +67,10 @@ a = Analysis(
         'PyQt6.QtWidgets',
         'PyQt6.QtCore',
         'PyQt6.QtGui',
+        'spacy',
+        'spacy.lang.pt',
+        'pt_core_news_lg',
+        'openai',
     ],
     hookspath=[],
     hooksconfig={},

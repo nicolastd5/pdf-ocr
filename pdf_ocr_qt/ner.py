@@ -53,6 +53,13 @@ class NERPipeline:
     def is_spacy_installed() -> bool:
         try:
             import spacy
+            # Dentro do EXE (PyInstaller), o modelo está em _MEIPASS como diretório
+            if getattr(sys, "frozen", False):
+                import os
+                model_dir = os.path.join(sys._MEIPASS, "pt_core_news_lg")
+                if os.path.isdir(model_dir):
+                    return True
+                return False
             return spacy.util.is_package("pt_core_news_lg")
         except Exception:
             return False
@@ -129,7 +136,12 @@ class NERPipeline:
 
         if self._nlp is None:
             try:
-                self._nlp = spacy.load("pt_core_news_lg")
+                if getattr(sys, "frozen", False):
+                    import os
+                    model_path = os.path.join(sys._MEIPASS, "pt_core_news_lg")
+                    self._nlp = spacy.load(model_path)
+                else:
+                    self._nlp = spacy.load("pt_core_news_lg")
             except OSError:
                 raise SpacyNotInstalledError(
                     "Modelo pt_core_news_lg não encontrado. "
