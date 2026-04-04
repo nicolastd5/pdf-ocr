@@ -3,10 +3,10 @@ import webbrowser
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QMessageBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from pdf_ocr_qt.styles import flat_btn, accent_btn, C
 
-APP_VERSION      = "2.0.0"
+APP_VERSION      = "2.0.1"
 GITHUB_RELEASES_PAGE = "https://github.com/nicolastd5/pdf-ocr/releases"
 
 
@@ -46,11 +46,10 @@ class AboutPage(QWidget):
         layout.addWidget(cl_title)
 
         changelog = QLabel(
-            "• Interface completamente reescrita em PyQt6 — mais rápida e moderna\n"
-            "• Versão Tkinter removida: PDF Tools agora é 100% PyQt6\n"
-            "• spaCy e modelo pt_core_news_lg embutidos diretamente no EXE\n"
-            "• Detecção de nomes por IA sem nenhuma instalação adicional\n"
-            "• Limpeza de código: imports e funções não utilizadas removidos"
+            "• Corrigido: verificação de atualização e auto-update voltaram a funcionar\n"
+            "• Corrigido: modelo spaCy agora é encontrado corretamente dentro do EXE\n"
+            "• Busca robusta do modelo pt_core_news_lg em múltiplos paths do _MEIPASS\n"
+            "• Comunicação thread→UI reescrita com QTimer.singleShot (mais confiável)"
         )
         changelog.setObjectName("dim_lbl")
         changelog.setWordWrap(True)
@@ -83,19 +82,13 @@ class AboutPage(QWidget):
             from pdf_ocr_qt.main import fetch_latest_release
             info = fetch_latest_release()
             tag = info.get("tag", "")
-            from PyQt6.QtCore import QMetaObject, Qt
             if tag and tag != APP_VERSION:
-                QMetaObject.invokeMethod(self, "_show_update",
-                    Qt.ConnectionType.QueuedConnection)
+                QTimer.singleShot(0, self._show_update)
             else:
-                from PyQt6.QtCore import QMetaObject
-                QMetaObject.invokeMethod(self, "_show_latest",
-                    Qt.ConnectionType.QueuedConnection)
+                QTimer.singleShot(0, self._show_latest)
         except Exception as e:
-            from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
-            QMetaObject.invokeMethod(self, "_show_error",
-                Qt.ConnectionType.QueuedConnection,
-                Q_ARG(str, str(e)))
+            msg = str(e)
+            QTimer.singleShot(0, lambda: self._show_error(msg))
 
     def _show_update(self):
         self._update_lbl.setText("Nova versão disponível!")

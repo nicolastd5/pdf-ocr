@@ -50,16 +50,29 @@ class NERPipeline:
         self._nlp        = None   # lazy-loaded
 
     @staticmethod
+    def _find_model_path() -> str | None:
+        """Localiza o diretório do modelo pt_core_news_lg dentro do _MEIPASS."""
+        import os
+        base = sys._MEIPASS
+        # collect_data_files pode gerar pt_core_news_lg/ ou pt_core_news_lg/pt_core_news_lg/
+        for candidate in [
+            os.path.join(base, "pt_core_news_lg"),
+            os.path.join(base, "pt_core_news_lg", "pt_core_news_lg"),
+        ]:
+            if os.path.isfile(os.path.join(candidate, "meta.json")):
+                return candidate
+        # Busca recursiva como fallback
+        for root, dirs, files in os.walk(base):
+            if "meta.json" in files and os.path.basename(root).startswith("pt_core_news_lg"):
+                return root
+        return None
+
+    @staticmethod
     def is_spacy_installed() -> bool:
         try:
             import spacy
-            # Dentro do EXE (PyInstaller), o modelo está em _MEIPASS como diretório
             if getattr(sys, "frozen", False):
-                import os
-                model_dir = os.path.join(sys._MEIPASS, "pt_core_news_lg")
-                if os.path.isdir(model_dir):
-                    return True
-                return False
+                return NERPipeline._find_model_path() is not None
             return spacy.util.is_package("pt_core_news_lg")
         except Exception:
             return False
@@ -137,8 +150,9 @@ class NERPipeline:
         if self._nlp is None:
             try:
                 if getattr(sys, "frozen", False):
-                    import os
-                    model_path = os.path.join(sys._MEIPASS, "pt_core_news_lg")
+                    model_path = NERPipeline._find_model_path()
+                    if model_path is None:
+                        raise OSError("Modelo não encontrado em _MEIPASS")
                     self._nlp = spacy.load(model_path)
                 else:
                     self._nlp = spacy.load("pt_core_news_lg")

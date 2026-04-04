@@ -17,7 +17,7 @@ from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont
 
 from pdf_ocr_qt.styles import QSS, C, nav_btn
 
-APP_VERSION          = "2.0.0"
+APP_VERSION          = "2.0.1"
 GITHUB_USER          = "nicolastd5"
 GITHUB_REPO          = "pdf-ocr"
 GITHUB_RELEASES_API  = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -249,13 +249,9 @@ class MainWindow(QMainWindow):
         try:
             info = fetch_latest_release()
             tag = info.get("tag", "")
+            url = info.get("html_url", GITHUB_RELEASES_PAGE)
             if tag and tag != APP_VERSION:
-                from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
-                QMetaObject.invokeMethod(
-                    self, "_show_update_dialog",
-                    Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, tag),
-                    Q_ARG(str, info.get("html_url", GITHUB_RELEASES_PAGE)))
+                QTimer.singleShot(0, lambda: self._show_update_dialog(tag, url))
         except Exception:
             pass
 
