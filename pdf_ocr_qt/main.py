@@ -220,6 +220,11 @@ class MainWindow(QMainWindow):
                 self._prefs = json.load(f)
         except Exception:
             self._prefs = {}
+        # Garantir chaves NER com defaults
+        self._prefs.setdefault("use_ner",    False)
+        self._prefs.setdefault("use_openai", False)
+        self._prefs.setdefault("openai_key", "")
+        self._prefs.setdefault("ner_engine", "spacy")
 
     def _save_prefs(self):
         try:
