@@ -1,13 +1,11 @@
 import math
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QWidget
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt6.QtCore import Qt, QTimer, QRectF
-from PyQt6.QtGui import QPainter, QColor, QPen
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush
 from pdf_ocr_qt.styles import C
 
 
 class _OrbitCanvas(QWidget):
-    """Canvas que desenha dois círculos orbitais animados."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(64, 64)
@@ -37,61 +35,72 @@ class _OrbitCanvas(QWidget):
         p.end()
 
 
-class SpinnerDialog(QDialog):
-    """Modal animado de progresso — equivalente ao SpinnerWindow do Tkinter."""
+class SpinnerDialog(QWidget):
+    """Overlay de progresso — widget filho flutuante, sem QDialog fantasma."""
 
     def __init__(self, parent=None):
-        super().__init__(parent, Qt.WindowType.FramelessWindowHint |
-                         Qt.WindowType.WindowStaysOnTopHint)
+        super().__init__(parent)
+        # Janela sem decoração, transparente, sempre visível sobre o pai
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
+        )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setModal(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.hide()
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(12)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # Fundo escuro arredondado
-        inner = QWidget(self)
-        inner.setStyleSheet(f"""
-            background-color: {C["panel"]};
-            border-radius: 12px;
-            border: 1px solid {C["border"]};
+        # Painel central com fundo sólido arredondado
+        panel = QWidget(self)
+        panel.setObjectName("spinner_panel")
+        panel.setStyleSheet(f"""
+            QWidget#spinner_panel {{
+                background-color: {C["panel"]};
+                border-radius: 14px;
+                border: 1px solid {C["border"]};
+            }}
         """)
-        inner_layout = QVBoxLayout(inner)
-        inner_layout.setContentsMargins(32, 28, 32, 28)
-        inner_layout.setSpacing(12)
-        inner_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        inner = QVBoxLayout(panel)
+        inner.setContentsMargins(36, 32, 36, 32)
+        inner.setSpacing(14)
+        inner.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._orbit = _OrbitCanvas()
-        inner_layout.addWidget(self._orbit, alignment=Qt.AlignmentFlag.AlignCenter)
+        inner.addWidget(self._orbit, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._status_lbl = QLabel("Processando...")
-        self._status_lbl.setStyleSheet(f"color: {C['fg']}; font-size: 14px; background: transparent;")
+        self._status_lbl.setStyleSheet(
+            f"color: {C['fg']}; font-size: 14px; background: transparent;")
         self._status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        inner_layout.addWidget(self._status_lbl)
+        inner.addWidget(self._status_lbl)
 
         self._page_lbl = QLabel("")
-        self._page_lbl.setStyleSheet(f"color: {C['fg_dim']}; font-size: 12px; background: transparent;")
+        self._page_lbl.setStyleSheet(
+            f"color: {C['fg_dim']}; font-size: 12px; background: transparent;")
         self._page_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        inner_layout.addWidget(self._page_lbl)
+        inner.addWidget(self._page_lbl)
 
-        layout.addWidget(inner)
+        # Layout externo só para dimensionar o widget raiz igual ao panel
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(panel)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._orbit.step)
 
+    def paintEvent(self, event):
+        # Não pinta nada no widget raiz — o fundo deve ser completamente
+        # transparente para que só o panel arredondado apareça.
+        pass
+
     def show_spinner(self, status: str = "Processando..."):
         self._status_lbl.setText(status)
         self._page_lbl.setText("")
-        self._timer.start(40)  # ~25 fps
-        if self.parent():
-            p = self.parent()
-            self.move(
-                p.mapToGlobal(p.rect().center()) -
-                self.rect().center()
-            )
+        self._timer.start(40)
+        self._center_on_parent()
         self.show()
+        self.raise_()
 
     def hide_spinner(self):
         self._timer.stop()
@@ -102,3 +111,11 @@ class SpinnerDialog(QDialog):
 
     def set_page(self, current: int, total: int):
         self._page_lbl.setText(f"{current} / {total}")
+
+    def _center_on_parent(self):
+        p = self.parent()
+        if p is None:
+            return
+        self.adjustSize()
+        parent_center = p.mapToGlobal(p.rect().center())
+        self.move(parent_center - self.rect().center())

@@ -1,5 +1,6 @@
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QRectF, QPointF
 from PyQt6.QtWidgets import QPushButton
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QBrush, QPainterPath, QFont
 
 C = {
     "bg":        "#1e1e1e",
@@ -222,3 +223,109 @@ def nav_btn(text: str) -> QPushButton:
     b.setObjectName("nav_btn")
     b.setCursor(Qt.CursorShape.PointingHandCursor)
     return b
+
+
+def _make_icon(draw_fn, size: int = 20) -> QIcon:
+    """Cria um QIcon 20×20 usando uma função de desenho QPainter."""
+    pix = QPixmap(size, size)
+    pix.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    draw_fn(p, size)
+    p.end()
+    return QIcon(pix)
+
+
+def icon_split() -> QIcon:
+    """✂ Ícone de dividir: uma folha com linha tracejada horizontal no meio."""
+    def draw(p: QPainter, s: int):
+        fg = QColor(C["fg_dim"])
+        acc = QColor(C["accent"])
+        pen = QPen(fg, 1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.setBrush(QColor(C["input"]))
+        # Folha PDF
+        margin = 3
+        fold = 5
+        path = QPainterPath()
+        path.moveTo(margin, margin)
+        path.lineTo(s - margin - fold, margin)
+        path.lineTo(s - margin, margin + fold)
+        path.lineTo(s - margin, s - margin)
+        path.lineTo(margin, s - margin)
+        path.closeSubpath()
+        p.drawPath(path)
+        # Linha tracejada central
+        dash_pen = QPen(acc, 1.5)
+        dash_pen.setStyle(Qt.PenStyle.DashLine)
+        p.setPen(dash_pen)
+        mid = s // 2
+        p.drawLine(margin + 1, mid, s - margin - 1, mid)
+        # Setas apontando para fora (cima e baixo)
+        arr = QPen(acc, 1.5)
+        arr.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(arr)
+        cx = s // 2
+        # seta cima
+        p.drawLine(cx, mid - 2, cx, margin + 1)
+        p.drawLine(cx - 2, margin + 3, cx, margin + 1)
+        p.drawLine(cx + 2, margin + 3, cx, margin + 1)
+        # seta baixo
+        p.drawLine(cx, mid + 2, cx, s - margin - 1)
+        p.drawLine(cx - 2, s - margin - 3, cx, s - margin - 1)
+        p.drawLine(cx + 2, s - margin - 3, cx, s - margin - 1)
+    return _make_icon(draw)
+
+
+def icon_merge() -> QIcon:
+    """⊞ Ícone de juntar: duas folhas pequenas convergindo para uma maior."""
+    def draw(p: QPainter, s: int):
+        fg = QColor(C["fg_dim"])
+        acc = QColor(C["accent"])
+        pen = QPen(fg, 1.2)
+        p.setPen(pen)
+        p.setBrush(QColor(C["input"]))
+        # Folha esquerda (menor, atrás)
+        p.drawRoundedRect(QRectF(2, 4, 7, 9), 1, 1)
+        # Folha direita (menor, atrás)
+        p.drawRoundedRect(QRectF(11, 4, 7, 9), 1, 1)
+        # Setas convergindo
+        arr = QPen(acc, 1.5)
+        arr.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(arr)
+        mid = s // 2
+        # seta esquerda →
+        p.drawLine(9, mid, 11, mid)
+        p.drawLine(9, mid, 9 - 2, mid - 2)
+        p.drawLine(9, mid, 9 - 2, mid + 2)
+        # seta direita ←
+        p.drawLine(11, mid, 9, mid)
+        p.drawLine(11, mid, 11 + 2, mid - 2)
+        p.drawLine(11, mid, 11 + 2, mid + 2)
+        # Folha resultado (maior, frente)
+        p.setPen(QPen(acc, 1.5))
+        p.setBrush(QColor(0, 0, 0, 0))
+        p.drawRoundedRect(QRectF(6, 6, 8, 10), 1.5, 1.5)
+    return _make_icon(draw)
+
+
+def icon_about() -> QIcon:
+    """ℹ Ícone de informação: círculo com 'i'."""
+    def draw(p: QPainter, s: int):
+        acc = QColor(C["accent"])
+        # Círculo
+        pen = QPen(acc, 1.8)
+        p.setPen(pen)
+        p.setBrush(QColor(0, 0, 0, 0))
+        p.drawEllipse(QRectF(2, 2, s - 4, s - 4))
+        # Letra i
+        p.setBrush(acc)
+        p.setPen(Qt.PenStyle.NoPen)
+        cx = s / 2
+        # ponto do i
+        p.drawEllipse(QRectF(cx - 1.2, 5, 2.4, 2.4))
+        # haste do i
+        p.setBrush(acc)
+        p.drawRoundedRect(QRectF(cx - 1.2, 9, 2.4, 7), 1, 1)
+    return _make_icon(draw)

@@ -30,10 +30,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python dependencies
-        run: pip install pyinstaller pytesseract pillow pdf2image reportlab PyPDF2 pdf2docx PyQt6 spacy
-
-      - name: Download spaCy Portuguese model
-        run: python -m spacy download pt_core_news_lg
+        run: pip install pyinstaller pytesseract pillow pdf2image reportlab PyPDF2 pdf2docx PyQt6
 
       # ── Tesseract via Chocolatey (já disponível no runner) ───────────────────
       - name: Install Tesseract via Chocolatey
@@ -193,14 +190,17 @@ jobs:
           body: |
             ## ${{ steps.resolve_tag.outputs.tag }} — PDF Tools
 
-            ### ✦ OCR mais preciso
-            Removido o pré-processamento agressivo (binarização, filtro mediana, contraste forçado) que era aplicado antes do Tesseract. Em PDFs de qualidade normal ou alta, esse processamento degradava o texto reconhecido. O Tesseract agora recebe a imagem original.
+            ### ✦ Opção de IA removida
+            As opções spaCy e OpenAI foram removidas. O OCR agora usa exclusivamente o Tesseract, que é mais estável e não requer dependências externas.
 
-            ### ✦ Erros da OpenAI visíveis
-            Falhas na API OpenAI (chave inválida, sem conexão, limite de tokens) agora aparecem como aviso na tela. Antes, os erros eram engolidos silenciosamente. A barra de status também indica quando a chamada OpenAI está em andamento.
+            ### ✦ Ícones nas abas Dividir, Juntar e Sobre
+            Ícones desenhados vetorialmente adicionados na barra lateral para Dividir, Juntar e Sobre.
 
-            ### ✦ Modelo spaCy corrigido no EXE (v2.0.2)
-            O path real do modelo dentro do EXE é `pt_core_news_lg/pt_core_news_lg-X.Y.Z/` (com versão), não `pt_core_news_lg/pt_core_news_lg/`.
+            ### ✦ Animação de progresso corrigida
+            Eliminada a "caixa fantasma" que aparecia atrás do spinner de progresso durante o processamento.
+
+            ### ✦ OCR melhorado (v2.0.3)
+            Removido pré-processamento agressivo que degradava PDFs de boa qualidade antes do Tesseract.
 
             ---
             Veja o [histórico de versões](https://github.com/nicolastd5/pdf-ocr/releases) para versões anteriores.

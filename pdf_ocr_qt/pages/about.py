@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from pdf_ocr_qt.styles import flat_btn, accent_btn, C
 
-APP_VERSION      = "2.0.3"
+APP_VERSION      = "2.0.4"
 GITHUB_RELEASES_PAGE = "https://github.com/nicolastd5/pdf-ocr/releases"
 
 
@@ -46,11 +46,10 @@ class AboutPage(QWidget):
         layout.addWidget(cl_title)
 
         changelog = QLabel(
-            "• OCR melhorado: removido pré-processamento agressivo que degradava PDFs\n"
-            "• OpenAI: erros agora são exibidos (chave inválida, sem conexão, etc.)\n"
-            "• OpenAI: barra de status indica quando chamada está acontecendo\n"
-            "• Corrigido: modelo spaCy carregado corretamente no EXE (v2.0.2)\n"
-            "• Corrigido: auto-update e verificação de atualização (v2.0.1)"
+            "• Removida opção de IA (spaCy/OpenAI) — OCR padrão Tesseract\n"
+            "• Ícones adicionados nas abas Dividir, Juntar e Sobre\n"
+            "• Corrigida animação de progresso (caixa fantasma eliminada)\n"
+            "• OCR melhorado: imagem original enviada ao Tesseract (v2.0.3)"
         )
         changelog.setObjectName("dim_lbl")
         changelog.setWordWrap(True)

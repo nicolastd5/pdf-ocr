@@ -15,9 +15,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont
 
-from pdf_ocr_qt.styles import QSS, C, nav_btn
+from pdf_ocr_qt.styles import QSS, C, nav_btn, icon_split, icon_merge, icon_about
 
-APP_VERSION          = "2.0.3"
+APP_VERSION          = "2.0.4"
 GITHUB_USER          = "nicolastd5"
 GITHUB_REPO          = "pdf-ocr"
 GITHUB_RELEASES_API  = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -158,15 +158,18 @@ class MainWindow(QMainWindow):
 
         self._nav_btns: dict[str, QPushButton] = {}
         pages_map = [
-            ("ocr",      "🔍  OCR"),
-            ("compress", "🗜  Comprimir"),
-            ("word",     "📄  PDF → Word"),
-            ("split",    "✂  Dividir"),
-            ("merge",    "⊞  Juntar"),
-            ("about",    "ℹ  Sobre"),
+            ("ocr",      "🔍  OCR",        None),
+            ("compress", "🗜  Comprimir",   None),
+            ("word",     "📄  PDF → Word",  None),
+            ("split",    "   Dividir",      icon_split()),
+            ("merge",    "   Juntar",       icon_merge()),
+            ("about",    "   Sobre",        icon_about()),
         ]
-        for key, label in pages_map:
+        for key, label, icon in pages_map:
             btn = nav_btn(label)
+            if icon:
+                btn.setIcon(icon)
+                btn.setIconSize(__import__('PyQt6.QtCore', fromlist=['QSize']).QSize(20, 20))
             btn.clicked.connect(lambda _, k=key: self._navigate(k))
             side_layout.addWidget(btn)
             self._nav_btns[key] = btn
@@ -224,11 +227,7 @@ class MainWindow(QMainWindow):
                 self._prefs = json.load(f)
         except Exception:
             self._prefs = {}
-        # Garantir chaves NER com defaults
-        self._prefs.setdefault("use_ner",    False)
-        self._prefs.setdefault("use_openai", False)
-        self._prefs.setdefault("openai_key", "")
-        self._prefs.setdefault("ner_engine", "spacy")
+        pass
 
     def _save_prefs(self):
         try:

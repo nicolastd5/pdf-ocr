@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(C:/Users/nicol/AppData/Local/Python/bin/pip show:*)",
+      "Bash(C:/Users/nicol/AppData/Local/Programs/Python/Python312/python.exe -m pip show spacy)",
+      "Bash(gh run:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git tag:*)",
+      "Bash(gh repo:*)"
+    ]
+  }
+}
