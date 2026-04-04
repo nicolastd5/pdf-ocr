@@ -35,7 +35,7 @@ Converter = None        # pdf2docx.Converter
 DEPS_OK = None          # None = not yet loaded; True/False = result
 MISSING_DEP = ""
 
-APP_VERSION = "1.0.7a"
+APP_VERSION = "1.0.8"
 GITHUB_USER = "nicolastd5"
 GITHUB_REPO = "pdf-ocr"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
@@ -2574,23 +2574,20 @@ class PDFOcrApp(TkinterDnD.Tk if _HAS_DND else tk.Tk):
                  bg=C["panel"], fg=C["fg_bright"]).pack(anchor="w")
 
         _changelog = [
-            ("⬢", "PDF → Word",
-             "Nova ferramenta: converte PDFs em documentos Word\n"
-             "(.docx) editáveis com preservação de layout.\n"
-             "Suporte a drag & drop e conversão em lote."),
-            ("⬡", "Splash screen aprimorado",
-             "Tela de carregamento com tempo mínimo de exibição\n"
-             "para melhor experiência visual ao iniciar."),
-            ("⬡", "Sidebar fixa",
-             "Barra lateral sempre visível com ícones e rótulos.\n"
-             "Navegação mais rápida entre as ferramentas."),
-            ("⬡", "Drag & drop no OCR",
-             "Arraste PDFs diretamente para a lista de OCR.\n"
-             "Zona visual de drop com suporte a múltiplos arquivos."),
-            ("⚙", "OCR otimizado e correções",
-             "Filtro mediano, PSM 3 automático, threshold elevado.\n"
-             "Recursos fechados corretamente, memória otimizada.\n"
-             "Crash no diálogo de atualização corrigido."),
+            ("⬢", "IA para detecção de nomes",
+             "Detecção de entidades nomeadas (NER) com spaCy.\n"
+             "Detecta pessoas, organizações e locais com destaque\n"
+             "colorido por tipo. Exportação de resultados em CSV."),
+            ("⬡", "OpenAI opcional",
+             "Integração com GPT-4o-mini para NER avançado.\n"
+             "Configure sua chave de API na página de OCR.\n"
+             "Funciona offline por padrão com spaCy."),
+            ("⬡", "Design tokens (UI)",
+             "Espaçamentos e fontes centralizados no dict UI{}.\n"
+             "Botões com estado desabilitado melhorado."),
+            ("⬡", "Migração PyQt6",
+             "Nova interface com PyQt6 (pdf_ocr_qt).\n"
+             "Workers assíncronos, spinner animado e drag & drop nativo."),
         ]
 
         cl_f = tk.Frame(cl_inner, bg=C["panel"])

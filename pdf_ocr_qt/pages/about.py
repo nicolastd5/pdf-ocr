@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from pdf_ocr_qt.styles import flat_btn, accent_btn, C
 
-APP_VERSION      = "1.0.7a"
+APP_VERSION      = "1.0.8"
 GITHUB_RELEASES_PAGE = "https://github.com/nicolastd5/pdf-ocr/releases"
 
 
@@ -46,11 +46,11 @@ class AboutPage(QWidget):
         layout.addWidget(cl_title)
 
         changelog = QLabel(
-            "• Migração para PyQt6 — visual moderno Ocean/Teal\n"
-            "• Drag & drop nativo (sem tkinterdnd2)\n"
-            "• Workers assíncronos com QThread + signals\n"
-            "• SpinnerDialog animado em todas as operações\n"
-            "• Estrutura multi-arquivo (pages/, widgets/, workers)"
+            "• IA para detecção de nomes com spaCy (NER)\n"
+            "• Detecta pessoas, organizações e locais — destaque colorido por tipo\n"
+            "• Exportação de entidades em CSV\n"
+            "• OpenAI opcional (GPT-4o-mini) para NER avançado\n"
+            "• Design tokens centralizados, botões com estado melhorado"
         )
         changelog.setObjectName("dim_lbl")
         changelog.setWordWrap(True)
