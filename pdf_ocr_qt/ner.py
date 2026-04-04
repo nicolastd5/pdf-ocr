@@ -1,5 +1,6 @@
 # pdf_ocr_qt/ner.py
 from __future__ import annotations
+import json
 import re
 import sys
 import subprocess
@@ -51,9 +52,8 @@ class NERPipeline:
     @staticmethod
     def is_spacy_installed() -> bool:
         try:
-            import spacy  # noqa: F401
-            spacy.load("pt_core_news_lg")
-            return True
+            import spacy
+            return spacy.util.is_package("pt_core_news_lg")
         except Exception:
             return False
 
@@ -80,20 +80,47 @@ class NERPipeline:
         else:
             yield "ERRO: falha ao baixar pt_core_news_lg."
 
-    def extract(self, ocr_data: dict, page_num: int,
-                img_w: int, img_h: int) -> NERResult:
+    @staticmethod
+    def _filter_tokens(ocr_data: dict) -> tuple[list[str], list[tuple]]:
+        """Return (words, token_bboxes) after filtering low-confidence tokens."""
+        texts   = ocr_data.get("text", [])
+        confs   = ocr_data.get("conf", [])
+        lefts   = ocr_data.get("left", [])
+        tops    = ocr_data.get("top", [])
+        widths  = ocr_data.get("width", [])
+        heights = ocr_data.get("height", [])
+
+        words: list[str] = []
+        token_bboxes: list[tuple] = []
+        for i, word in enumerate(texts):
+            if not word or not word.strip():
+                continue
+            try:
+                conf = int(confs[i])
+            except (TypeError, ValueError):
+                continue
+            if conf < 30:
+                continue
+            words.append(word)
+            token_bboxes.append((lefts[i], tops[i], widths[i], heights[i]))
+
+        return words, token_bboxes
+
+    def extract(self, ocr_data: dict, page_num: int) -> NERResult:
+        words, token_bboxes = self._filter_tokens(ocr_data)
+
         if self.engine == "spacy":
-            result = self._extract_spacy(ocr_data, page_num, img_w, img_h)
+            result = self._extract_spacy(ocr_data, page_num, words, token_bboxes)
         else:
             result = NERResult()
 
         if self.use_openai and self.openai_key:
-            result = self._enrich_openai(ocr_data, page_num, result)
+            result = self._enrich_openai(ocr_data, page_num, result, words, token_bboxes)
 
         return result
 
     def _extract_spacy(self, ocr_data: dict, page_num: int,
-                       img_w: int, img_h: int) -> NERResult:
+                       words: list[str], token_bboxes: list[tuple]) -> NERResult:
         try:
             import spacy
         except ImportError:
@@ -108,27 +135,6 @@ class NERPipeline:
                     "Modelo pt_core_news_lg não encontrado. "
                     "Execute: python -m spacy download pt_core_news_lg")
 
-        texts   = ocr_data.get("text", [])
-        confs   = ocr_data.get("conf", [])
-        lefts   = ocr_data.get("left", [])
-        tops    = ocr_data.get("top", [])
-        widths  = ocr_data.get("width", [])
-        heights = ocr_data.get("height", [])
-
-        token_bboxes: list[tuple[int, int, int, int]] = []
-        words: list[str] = []
-        for i, word in enumerate(texts):
-            if not word or not word.strip():
-                continue
-            try:
-                conf = int(confs[i])
-            except (TypeError, ValueError):
-                continue
-            if conf < 30:
-                continue
-            words.append(word)
-            token_bboxes.append((lefts[i], tops[i], widths[i], heights[i]))
-
         full_text = " ".join(words)
         doc = self._nlp(full_text)
 
@@ -141,8 +147,9 @@ class NERPipeline:
 
         for ent in doc.ents:
             ent_type = _SPACY_LABEL_MAP.get(ent.label_, "MISC")
-            bbox = self._find_bbox(ent.text, words, token_bboxes, word_char_starts,
-                                   ent.start_char, ent.end_char)
+            bbox = NERPipeline._static_find_bbox(
+                ent.text, words, token_bboxes, word_char_starts,
+                ent.start_char, ent.end_char)
             entities.append(Entity(
                 text=ent.text,
                 type=ent_type,
@@ -152,33 +159,14 @@ class NERPipeline:
 
         return NERResult(entities=entities)
 
-    def _find_bbox(self, ent_text: str, words: list[str],
-                   token_bboxes: list[tuple], word_char_starts: list[int],
-                   start_char: int, end_char: int) -> tuple:
-        matched = []
-        for i, (w, cs) in enumerate(zip(words, word_char_starts)):
-            ce = cs + len(w)
-            if cs >= start_char and ce <= end_char + 1:
-                matched.append(token_bboxes[i])
-        if not matched:
-            return (0, 0, 0, 0)
-        x  = min(b[0] for b in matched)
-        y  = min(b[1] for b in matched)
-        x2 = max(b[0] + b[2] for b in matched)
-        y2 = max(b[1] + b[3] for b in matched)
-        return (x, y, x2 - x, y2 - y)
-
     def _enrich_openai(self, ocr_data: dict, page_num: int,
-                       base: NERResult) -> NERResult:
+                       base: NERResult, words: list[str],
+                       token_bboxes: list[tuple]) -> NERResult:
         try:
             from openai import OpenAI
         except ImportError:
             return base
 
-        texts  = ocr_data.get("text", [])
-        confs  = ocr_data.get("conf", [])
-        words  = [w for w, c in zip(texts, confs)
-                  if w and w.strip() and _safe_int(c) >= 30]
         page_text = " ".join(words)
         if not page_text.strip():
             return base
@@ -197,7 +185,6 @@ class NERPipeline:
                 temperature=0,
                 max_tokens=512,
             )
-            import json
             raw = resp.choices[0].message.content.strip()
             raw = re.sub(r"^```[a-z]*\n?", "", raw)
             raw = re.sub(r"\n?```$", "", raw)
@@ -205,22 +192,13 @@ class NERPipeline:
         except Exception:
             return base
 
-        existing_texts = {e.text.lower() for e in base.entities}
-        lefts   = ocr_data.get("left", [])
-        tops    = ocr_data.get("top", [])
-        widths  = ocr_data.get("width", [])
-        heights = ocr_data.get("height", [])
-
-        word_list  = [w for w, c in zip(texts, confs)
-                      if w and w.strip() and _safe_int(c) >= 30]
-        bbox_list  = [(lefts[i], tops[i], widths[i], heights[i])
-                      for i, (w, c) in enumerate(zip(texts, confs))
-                      if w and w.strip() and _safe_int(c) >= 30]
         char_starts: list[int] = []
         off = 0
-        for w in word_list:
+        for w in words:
             char_starts.append(off)
             off += len(w) + 1
+
+        existing_texts = {e.text.lower() for e in base.entities}
 
         new_entities = list(base.entities)
         for item in items:
@@ -230,13 +208,13 @@ class NERPipeline:
                 continue
             if ent_type not in ENTITY_TYPES:
                 ent_type = "MISC"
-            idx = next((i for i, w in enumerate(word_list)
+            idx = next((i for i, w in enumerate(words)
                         if ent_text.lower().startswith(w.lower())), -1)
             if idx >= 0:
                 cs = char_starts[idx]
                 ce = cs + len(ent_text)
                 bbox = NERPipeline._static_find_bbox(
-                    ent_text, word_list, bbox_list, char_starts, cs, ce)
+                    ent_text, words, token_bboxes, char_starts, cs, ce)
             else:
                 bbox = (0, 0, 0, 0)
             new_entities.append(Entity(
@@ -251,7 +229,7 @@ class NERPipeline:
         matched = []
         for i, (w, cs) in enumerate(zip(words, word_char_starts)):
             ce = cs + len(w)
-            if cs >= start_char and ce <= end_char + 1:
+            if cs >= start_char and ce <= end_char:
                 matched.append(token_bboxes[i])
         if not matched:
             return (0, 0, 0, 0)
