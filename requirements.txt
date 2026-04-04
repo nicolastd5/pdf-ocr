@@ -7,3 +7,8 @@ PyPDF2
 pdf2docx
 pyinstaller
 # Tesseract OCR e Poppler são embutidos automaticamente pelo GitHub Actions
+
+# ── IA / NER (opcional) — descomentar para ativar: ──────────────
+# spacy>=3.7
+# openai>=1.0
+# Após instalar spacy: python -m spacy download pt_core_news_lg
