@@ -200,6 +200,11 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self._stack)
 
+        # Carregar prefs nas páginas que as suportam
+        ocr_page = self._pages["ocr"]
+        if hasattr(ocr_page, "load_prefs"):
+            ocr_page.load_prefs(self._prefs)
+
     def _navigate(self, key: str):
         if self._active_nav:
             self._active_nav.setProperty("active", False)
@@ -234,6 +239,9 @@ class MainWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
+        ocr_page = self._pages.get("ocr")
+        if ocr_page and hasattr(ocr_page, "save_prefs"):
+            ocr_page.save_prefs(self._prefs)
         self._save_prefs()
         super().closeEvent(event)
 
