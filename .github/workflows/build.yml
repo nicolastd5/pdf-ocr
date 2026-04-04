@@ -149,6 +149,20 @@ jobs:
           Write-Host "=== deps\poppler\bin ==="
           Get-ChildItem deps\poppler\bin | Select-Object Name
 
+      # ── Diagnóstico spaCy (mostra onde os arquivos do modelo vão no _MEIPASS) ──
+      - name: Diagnose spaCy bundle paths
+        run: |
+          python - <<'EOF'
+          import spacy, os
+          from PyInstaller.utils.hooks import collect_data_files
+          model_path = spacy.util.get_package_path("pt_core_news_lg")
+          print("=== model_path:", model_path)
+          datas = collect_data_files("pt_core_news_lg")
+          print(f"=== collect_data_files produced {len(datas)} entries ===")
+          for src, dst in sorted(datas, key=lambda x: x[1]):
+              print(f"  DST={dst!r:40s}  SRC={os.path.basename(src)}")
+          EOF
+
       # ── Build EXE ────────────────────────────────────────────────────────────
       - name: Build EXE with PyInstaller
         run: pyinstaller pdf_ocr.spec
