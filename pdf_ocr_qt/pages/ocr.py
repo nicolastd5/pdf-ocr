@@ -235,6 +235,7 @@ class OcrPage(QWidget):
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
+        self._worker.warning.connect(self._on_warning)
         self._worker.entities.connect(self._on_entities)
         self._worker.start()
 
@@ -372,6 +373,10 @@ class OcrPage(QWidget):
                 f"{len(ok_files)} PDF(s) pesquisável(is) gerado(s)!\n\n"
                 + "\n".join(os.path.basename(p) for p in ok_files)
                 + "\n\nUse CTRL+F no leitor de PDF para pesquisar.")
+
+    def _on_warning(self, msg: str):
+        self._status.setText(f"Aviso: {msg}")
+        QMessageBox.warning(self, "Aviso OpenAI", msg)
 
     def _on_error(self, msg: str):
         self._spinner.hide_spinner()

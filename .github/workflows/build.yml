@@ -193,11 +193,14 @@ jobs:
           body: |
             ## ${{ steps.resolve_tag.outputs.tag }} — PDF Tools
 
-            ### ✦ Corrigido: modelo spaCy (IA) não carregava no EXE
-            Identificado o path real onde `collect_data_files` empacota o modelo: `_MEIPASS/pt_core_news_lg/pt_core_news_lg-X.Y.Z/`. As tentativas anteriores buscavam em `pt_core_news_lg/pt_core_news_lg/` (incorreto). O código agora busca pelo subdiretório que contém `config.cfg`, que é o identificador único do modelo real (o `meta.json` na raiz é do pacote Python, não do modelo).
+            ### ✦ OCR mais preciso
+            Removido o pré-processamento agressivo (binarização, filtro mediana, contraste forçado) que era aplicado antes do Tesseract. Em PDFs de qualidade normal ou alta, esse processamento degradava o texto reconhecido. O Tesseract agora recebe a imagem original.
 
-            ### ✦ Verificação de atualização corrigida (v2.0.1)
-            Auto-update e botão "Verificar atualização" voltaram a funcionar com `QTimer.singleShot`.
+            ### ✦ Erros da OpenAI visíveis
+            Falhas na API OpenAI (chave inválida, sem conexão, limite de tokens) agora aparecem como aviso na tela. Antes, os erros eram engolidos silenciosamente. A barra de status também indica quando a chamada OpenAI está em andamento.
+
+            ### ✦ Modelo spaCy corrigido no EXE (v2.0.2)
+            O path real do modelo dentro do EXE é `pt_core_news_lg/pt_core_news_lg-X.Y.Z/` (com versão), não `pt_core_news_lg/pt_core_news_lg/`.
 
             ---
             Veja o [histórico de versões](https://github.com/nicolastd5/pdf-ocr/releases) para versões anteriores.

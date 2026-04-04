@@ -6,7 +6,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 # ── Lazy-loaded heavy deps (mesmos do pdf_ocr.py) ──────────────
 import pytesseract
-from PIL import Image, ImageFilter, ImageEnhance, ImageOps
+from PIL import Image
 from pdf2image import convert_from_path
 import reportlab.pdfgen.canvas as rl_canvas
 from reportlab.lib.utils import ImageReader
@@ -18,6 +18,7 @@ class OcrWorker(QThread):
     progress = pyqtSignal(int, int, str)   # current_page, total_pages, status
     finished = pyqtSignal(list, list)       # ok_files, errors
     error    = pyqtSignal(str)
+    warning  = pyqtSignal(str)             # aviso não-fatal (ex: erro OpenAI)
     entities = pyqtSignal(list)   # list[Entity], emitido após finished
 
     def __init__(self, files, outdir, lang, highlight_names,
@@ -65,14 +66,10 @@ class OcrWorker(QThread):
             self.entities.emit(all_entities)
 
     def _preprocess_for_ocr(self, img):
-        img = img.convert("L")
-        img = ImageOps.autocontrast(img)
-        img = ImageEnhance.Contrast(img).enhance(1.5)
-        img = ImageEnhance.Sharpness(img).enhance(2.0)
-        img = img.filter(ImageFilter.MedianFilter(size=3))
-        threshold = 128
-        img = img.point(lambda p: 255 if p > threshold else 0)
-        return img
+        # Converte para RGB para garantir compatibilidade com Tesseract.
+        # Pré-processamento agressivo (binarização, contraste, mediana) era
+        # aplicado anteriormente mas degradava PDFs de boa qualidade; removido.
+        return img.convert("RGB")
 
     def _detect_names(self, ocr_data):
         """Detecta caixas delimitadoras de possíveis nomes próprios."""
@@ -151,7 +148,12 @@ class OcrWorker(QThread):
                 # ── Destaque de entidades ─────────────────────────
                 if pipeline is not None:
                     from pdf_ocr_qt.ner import ENTITY_TYPES
+                    if self.use_openai:
+                        self.progress.emit(pi, total_pages,
+                            f"[{fi}/{total_files}] OpenAI NER — {basename} — página {pi}/{total_pages}")
                     ner_result = pipeline.extract(ocr_data, pi)
+                    if getattr(pipeline, "last_openai_error", ""):
+                        self.warning.emit(f"OpenAI erro (pág. {pi}): {pipeline.last_openai_error}")
                     _COLORS = {
                         "PER":  (1.0, 0.85, 0.0, 0.35),
                         "ORG":  (0.2, 0.6,  1.0, 0.30),

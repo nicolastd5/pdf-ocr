@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from pdf_ocr_qt.styles import flat_btn, accent_btn, C
 
-APP_VERSION      = "2.0.2"
+APP_VERSION      = "2.0.3"
 GITHUB_RELEASES_PAGE = "https://github.com/nicolastd5/pdf-ocr/releases"
 
 
@@ -46,10 +46,11 @@ class AboutPage(QWidget):
         layout.addWidget(cl_title)
 
         changelog = QLabel(
-            "• Corrigido: modelo spaCy (IA) agora é carregado corretamente no EXE\n"
-            "• Identificado path real do modelo: pt_core_news_lg/pt_core_news_lg-X.Y.Z/\n"
-            "• Corrigido: verificação de atualização e auto-update funcionando\n"
-            "• Comunicação thread→UI reescrita com QTimer.singleShot"
+            "• OCR melhorado: removido pré-processamento agressivo que degradava PDFs\n"
+            "• OpenAI: erros agora são exibidos (chave inválida, sem conexão, etc.)\n"
+            "• OpenAI: barra de status indica quando chamada está acontecendo\n"
+            "• Corrigido: modelo spaCy carregado corretamente no EXE (v2.0.2)\n"
+            "• Corrigido: auto-update e verificação de atualização (v2.0.1)"
         )
         changelog.setObjectName("dim_lbl")
         changelog.setWordWrap(True)

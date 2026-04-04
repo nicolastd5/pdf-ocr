@@ -144,7 +144,10 @@ class NERPipeline:
         return words, token_bboxes
 
     def extract(self, ocr_data: dict, page_num: int) -> NERResult:
+        """Extrai entidades. Se OpenAI falhar, guarda o erro em self.last_openai_error
+        e retorna o resultado spaCy sem interromper o processamento."""
         words, token_bboxes = self._filter_tokens(ocr_data)
+        self.last_openai_error: str = ""
 
         if self.engine == "spacy":
             result = self._extract_spacy(ocr_data, page_num, words, token_bboxes)
@@ -152,7 +155,10 @@ class NERPipeline:
             result = NERResult()
 
         if self.use_openai and self.openai_key:
-            result = self._enrich_openai(ocr_data, page_num, result, words, token_bboxes)
+            try:
+                result = self._enrich_openai(ocr_data, page_num, result, words, token_bboxes)
+            except Exception as e:
+                self.last_openai_error = str(e)
 
         return result
 
@@ -208,7 +214,8 @@ class NERPipeline:
         try:
             from openai import OpenAI
         except ImportError:
-            return base
+            raise RuntimeError(
+                "Pacote 'openai' não instalado. Execute: pip install openai")
 
         page_text = " ".join(words)
         if not page_text.strip():
@@ -221,19 +228,16 @@ class NERPipeline:
             '[{"text":"...","type":"PER|ORG|LOC|MISC"}]\n\n'
             + page_text
         )
-        try:
-            resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0,
-                max_tokens=512,
-            )
-            raw = resp.choices[0].message.content.strip()
-            raw = re.sub(r"^```[a-z]*\n?", "", raw)
-            raw = re.sub(r"\n?```$", "", raw)
-            items = json.loads(raw)
-        except Exception:
-            return base
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=512,
+        )
+        raw = resp.choices[0].message.content.strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+        items = json.loads(raw)
 
         char_starts: list[int] = []
         off = 0

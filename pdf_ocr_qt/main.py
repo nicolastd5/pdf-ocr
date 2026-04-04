@@ -17,7 +17,7 @@ from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont
 
 from pdf_ocr_qt.styles import QSS, C, nav_btn
 
-APP_VERSION          = "2.0.2"
+APP_VERSION          = "2.0.3"
 GITHUB_USER          = "nicolastd5"
 GITHUB_REPO          = "pdf-ocr"
 GITHUB_RELEASES_API  = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
